@@ -1,4 +1,4 @@
-host.json
+# host.json se verzionira: bez njega `rayfin up` odbija deploy funkcija (nema tajni).
 local.settings.json
 deploymetadata.json
 bin/
