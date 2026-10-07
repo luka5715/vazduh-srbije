@@ -1,0 +1,14 @@
+interface:
+  display_name: Fabric App Quality Review
+  short_description: Provera vizuala, metrika i ponašanja aplikacije
+  default_prompt: Koristi $fabric-app-quality-review da proveriš moj Fabric app i
+    ispraviš nalaze uz jasno navedene dokaze.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  allow_implicit_invocation: true
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas

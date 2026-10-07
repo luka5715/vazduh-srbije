@@ -1,0 +1,14 @@
+interface:
+  display_name: Fabric App Visual Designer
+  short_description: Dizajn, teme i desktop/mobilni rasporedi
+  default_prompt: Koristi $fabric-app-visual-designer da napraviš moderan vizuelni
+    sistem i primenljive Power BI dizajn fajlove.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  allow_implicit_invocation: true
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas

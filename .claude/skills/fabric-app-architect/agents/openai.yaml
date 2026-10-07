@@ -1,0 +1,14 @@
+interface:
+  display_name: Fabric App Architect
+  short_description: Koncept, KPI definicije i UX Fabric aplikacije
+  default_prompt: Koristi $fabric-app-architect da osmisliš profesionalnu Fabric aplikaciju
+    sa konkretnim planom implementacije.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  allow_implicit_invocation: true
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas

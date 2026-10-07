@@ -1,0 +1,43 @@
+{
+  "name": "Fabric Premium Light",
+  "dataColors": [
+    "#2563EB",
+    "#0D9488",
+    "#7C3AED",
+    "#B45309",
+    "#DB2777",
+    "#64748B"
+  ],
+  "background": "#FFFFFF",
+  "firstLevelElements": "#172033",
+  "secondLevelElements": "#526077",
+  "thirdLevelElements": "#DCE2EC",
+  "fourthLevelElements": "#526077",
+  "secondaryBackground": "#F4F6FA",
+  "tableAccent": "#2563EB",
+  "good": "#15803D",
+  "neutral": "#92400E",
+  "bad": "#B91C1C",
+  "textClasses": {
+    "label": {
+      "fontSize": 12,
+      "fontFace": "Segoe UI",
+      "color": "#172033"
+    },
+    "title": {
+      "fontSize": 14,
+      "fontFace": "Segoe UI",
+      "color": "#172033"
+    },
+    "header": {
+      "fontSize": 14,
+      "fontFace": "Segoe UI",
+      "color": "#172033"
+    },
+    "callout": {
+      "fontSize": 32,
+      "fontFace": "Segoe UI",
+      "color": "#172033"
+    }
+  }
+}

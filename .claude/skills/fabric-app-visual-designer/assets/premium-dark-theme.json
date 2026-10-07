@@ -1,0 +1,43 @@
+{
+  "name": "Fabric Premium Dark",
+  "dataColors": [
+    "#60A5FA",
+    "#0D9488",
+    "#7D3CED",
+    "#B45309",
+    "#DB2777",
+    "#64748B"
+  ],
+  "background": "#111C2E",
+  "firstLevelElements": "#F1F5F9",
+  "secondLevelElements": "#A8B8CE",
+  "thirdLevelElements": "#314158",
+  "fourthLevelElements": "#A8B8CE",
+  "secondaryBackground": "#0B1220",
+  "tableAccent": "#60A5FA",
+  "good": "#4ADE80",
+  "neutral": "#FBBF24",
+  "bad": "#F87171",
+  "textClasses": {
+    "label": {
+      "fontSize": 12,
+      "fontFace": "Segoe UI",
+      "color": "#F1F5F9"
+    },
+    "title": {
+      "fontSize": 14,
+      "fontFace": "Segoe UI",
+      "color": "#F1F5F9"
+    },
+    "header": {
+      "fontSize": 14,
+      "fontFace": "Segoe UI",
+      "color": "#F1F5F9"
+    },
+    "callout": {
+      "fontSize": 32,
+      "fontFace": "Segoe UI",
+      "color": "#F1F5F9"
+    }
+  }
+}
