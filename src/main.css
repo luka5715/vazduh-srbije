@@ -1,0 +1,1085 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Telefon položen (npr. 844 × 390): bez bočne trake, a visina je mala – gornja traka se
+ * skroluje sa sadržajem, a donja navigacija je zbijena (vidi AppShell, TopBars, BottomNav).
+ */
+@custom-variant short (@media (max-width: 1023px) and (max-height: 500px));
+
+/*
+ * Dizajn tokeni aplikacije „Vazduh Srbije“ – pravac „Atmosfera“.
+ *
+ * Sirove vrednosti žive SAMO ovde. Komponente koriste Tailwind klase izvedene iz
+ * `@theme inline` ispod (bg-panel, text-ink, border-border-strong, fill-cat-3, bg-haze/20 …)
+ * ili CSS promenljive `var(--cat-N)` / `var(--haze)` za SVG i Canvas oznake.
+ *
+ * Boje SEPA kategorija namerno ponavljaju vrednosti iz
+ * rayfin/functions/src/shared/aqi.ts (CATEGORIES.color / colorDark), da bi
+ * tamna tema radila kroz CSS bez JavaScript-a. To je fiksna ordinalna skala SEPA
+ * (Dobar zeleno → Izuzetno zagađen ljubičasto) i ne menja se.
+ *
+ * „Izmaglica“ (`--haze`) je boja dominantne SEPA kategorije mreže: koren aplikacije
+ * (klasa `haze-scope`) je postavlja, a aurora, sjaj heroja i ivice panela je koriste
+ * uz mali alfa (`--glow-strength`). Bez podataka `--haze` je boja akcenta.
+ */
+
+/* Registrovane promenljive: `--haze` se glatko pretapa kad se promeni stanje mreže. */
+@property --haze {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: #5fd4f4;
+}
+
+@property --glow-strength {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0.4;
+}
+
+:root {
+  color-scheme: light;
+
+  /* „Vedro nebo“: matirani beli paneli na hladnoj, vrlo svetloj plavo-sivoj strani. */
+  --page: #edf2f7;
+  --page-2: #e3ebf3;
+  --panel: rgb(255 255 255 / 0.74);
+  --panel-solid: #ffffff;
+  --card: #ffffff;
+  --card-2: #f1f5f9;
+  --border: rgb(15 30 45 / 0.09);
+  --border-strong: rgb(15 30 45 / 0.16);
+  --ink: #0d1a26;
+  --muted: #52667a;
+  --faint: #8697a9;
+  /* Tekst u „faint“ tonu (natpisi, jedinice, legende): ≥ 4,5 : 1 na strani, panelu i kartici.
+     `--faint` ostaje za ispune, linije i ivice (vidi `--text-color-faint` u @theme inline). */
+  --faint-text: #5f6c79;
+  --grid: rgb(15 30 45 / 0.07);
+
+  --accent: #0a6f9c;
+  --accent-ink: #ffffff;
+  --accent-soft: #dceef7;
+  --accent-soft-ink: #074e6e;
+
+  --danger: #b42318;
+  --danger-ink: #ffffff;
+  --danger-soft: #fdecea;
+  --danger-soft-ink: #7a1710;
+  --ok: #1e7e4c;
+  --ok-soft: #e4f4ea;
+  --ok-soft-ink: #155c38;
+  --warn: #8a5a00;
+  --warn-soft: #fff1cc;
+  --warn-soft-ink: #5c3d00;
+
+  --cat-0: #2e9e5b;
+  --cat-1: #7cb342;
+  --cat-2: #e0b000;
+  --cat-3: #ef7d1a;
+  --cat-4: #d13b3b;
+  --cat-5: #7b2c8a;
+  /* Boje sjaja izmaglice (`--haze`). U svetloj temi su iste kao kategorije; u tamnoj je
+     „Umeren“ pomeren ka toplijem ćilibaru, jer prigušeno žuto preko tamnoplave izgleda maslinasto. */
+  --glow-0: var(--cat-0);
+  --glow-1: var(--cat-1);
+  --glow-2: var(--cat-2);
+  --glow-3: var(--cat-3);
+  --glow-4: var(--cat-4);
+  --glow-5: var(--cat-5);
+  --cat-ink-0: #06130b;
+  --cat-ink-1: #0b1507;
+  --cat-ink-2: #1a1400;
+  /* Tamno mastilo na narandžastoj (6,9 : 1); belo je bilo 2,8 : 1. */
+  --cat-ink-3: #1a0d00;
+  --cat-ink-4: #ffffff;
+  --cat-ink-5: #ffffff;
+  /* Tanke oznake kategorija (linije, obrisi, prazni markeri, krajnje tačke, trake ≤ 6 px):
+     ista nijansa, tamnija u svetloj temi – svetle --cat-1/2/3 su na beloj 2,5 / 2,0 / 2,8 : 1, ove
+     3,4 : 1 (≈ 3,05 na strani). Ispune (čipovi, ćelije, stubovi) ostaju na --cat-N. */
+  --cat-mark-0: var(--cat-0);
+  --cat-mark-1: #699738;
+  --cat-mark-2: #aa8600;
+  --cat-mark-3: #d96d0f;
+  --cat-mark-4: var(--cat-4);
+  --cat-mark-5: var(--cat-5);
+
+  /* Jačina sjaja izmaglice (množi alfa svih haze efekata). */
+  --glow-strength: 0.25;
+  /* Udeo izmaglice u velikoj mrlji aurore i u sjaju ugla panela (množi se sa --glow-strength). */
+  --aurora-strength: 60%;
+  --sheen-strength: 30%;
+  /* Pojačanje podvlačenja reči u heroju: na beloj podlozi slab sjaj je jedva vidljiv. */
+  --underline-boost: 1.8;
+  /* Neprozirnost čestica Košave u odnosu na boju izmaglice. */
+  --particle-alpha: 0.75;
+  --haze: var(--accent);
+
+  --shadow-float: 0 12px 32px -12px rgb(13 26 38 / 0.22), 0 2px 8px -2px rgb(13 26 38 / 0.12);
+  --shadow-panel: 0 1px 2px rgb(13 26 38 / 0.04), 0 10px 30px -18px rgb(13 26 38 / 0.22);
+  --shadow-lift: 0 2px 4px rgb(13 26 38 / 0.05), 0 18px 36px -18px rgb(13 26 38 / 0.3);
+  --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.7);
+}
+
+.dark {
+  color-scheme: dark;
+
+  /* Duboko noćno nebo; staklo i sjaj su izlog tamne teme. */
+  --page: #070c14;
+  --page-2: #0b1522;
+  --panel: rgb(16 26 38 / 0.72);
+  --panel-solid: #101a26;
+  --card: #111c29;
+  --card-2: rgb(255 255 255 / 0.045);
+  --border: rgb(148 180 210 / 0.14);
+  --border-strong: rgb(148 180 210 / 0.26);
+  --ink: #eaf2f9;
+  --muted: #9fb2c5;
+  --faint: #6d8196;
+  --faint-text: #8297ad;
+  --grid: rgb(148 180 210 / 0.1);
+
+  --accent: #5fd4f4;
+  --accent-ink: #04202b;
+  --accent-soft: rgb(95 212 244 / 0.14);
+  --accent-soft-ink: #b5ecfa;
+
+  --danger: #ef5c5c;
+  --danger-ink: #1a0707;
+  --danger-soft: #3a1b1d;
+  --danger-soft-ink: #ffb4b4;
+  --ok: #45c074;
+  --ok-soft: #173224;
+  --ok-soft-ink: #9fe3b8;
+  --warn: #f2c200;
+  --warn-soft: #3a2f0b;
+  --warn-soft-ink: #ffe28a;
+
+  --cat-0: #45c074;
+  --cat-1: #9ccc65;
+  --cat-2: #f2c200;
+  --cat-3: #ff9440;
+  --cat-4: #ef5c5c;
+  --cat-5: #b363c4;
+  --glow-2: #ffa23a;
+  --cat-ink-0: #06130b;
+  --cat-ink-1: #0b1507;
+  --cat-ink-2: #1a1400;
+  --cat-ink-3: #1a0d00;
+  --cat-ink-4: #1a0707;
+  /* Tamno mastilo na svetloj ljubičastoj (5,2 : 1); belo je bilo 3,8 : 1. */
+  --cat-ink-5: #14051a;
+  /* Tamna tema: sve kategorije su ≥ 4,5 : 1 na panelu – tanke oznake su iste kao ispune. */
+  --cat-mark-0: var(--cat-0);
+  --cat-mark-1: var(--cat-1);
+  --cat-mark-2: var(--cat-2);
+  --cat-mark-3: var(--cat-3);
+  --cat-mark-4: var(--cat-4);
+  --cat-mark-5: var(--cat-5);
+
+  --glow-strength: 0.55;
+  --particle-alpha: 0.9;
+  /* Žuto-zelena izmaglica preko tamnoplave strane deluje maslinasto: aurora i sjaj uglova
+     panela su blaži. Sjaj ugla je prepolovljen (14 → 7 %): natpisi i jedinice gore levo u
+     panelu stoje na njemu, a tekst u „faint“ tonu je na punom sjaju pao na ~4,2 : 1. */
+  --aurora-strength: 34%;
+  --sheen-strength: 7%;
+  --underline-boost: 1;
+
+  --shadow-float: 0 16px 40px -14px rgb(0 0 0 / 0.7), 0 2px 8px -2px rgb(0 0 0 / 0.45);
+  --shadow-panel: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 18px 40px -26px rgb(0 0 0 / 0.75);
+  --shadow-lift: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 24px 48px -24px rgb(0 0 0 / 0.85);
+  --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.05);
+}
+
+/* Bez izbora korisnika (nema .light/.dark klase) prati se sistem i bez JavaScript-a. */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light):not(.dark) {
+    color-scheme: dark;
+    --page: #070c14;
+    --page-2: #0b1522;
+    --panel: rgb(16 26 38 / 0.72);
+    --panel-solid: #101a26;
+    --card: #111c29;
+    --card-2: rgb(255 255 255 / 0.045);
+    --border: rgb(148 180 210 / 0.14);
+    --border-strong: rgb(148 180 210 / 0.26);
+    --ink: #eaf2f9;
+    --muted: #9fb2c5;
+    --faint: #6d8196;
+    --faint-text: #8297ad;
+    --grid: rgb(148 180 210 / 0.1);
+    --accent: #5fd4f4;
+    --accent-ink: #04202b;
+    --accent-soft: rgb(95 212 244 / 0.14);
+    --accent-soft-ink: #b5ecfa;
+    --danger: #ef5c5c;
+    --danger-ink: #1a0707;
+    --danger-soft: #3a1b1d;
+    --danger-soft-ink: #ffb4b4;
+    --ok: #45c074;
+    --ok-soft: #173224;
+    --ok-soft-ink: #9fe3b8;
+    --warn: #f2c200;
+    --warn-soft: #3a2f0b;
+    --warn-soft-ink: #ffe28a;
+    --cat-0: #45c074;
+    --cat-1: #9ccc65;
+    --cat-2: #f2c200;
+    --cat-3: #ff9440;
+    --cat-4: #ef5c5c;
+    --cat-5: #b363c4;
+    --glow-2: #ffa23a;
+    --cat-ink-3: #1a0d00;
+    --cat-ink-4: #1a0707;
+    --cat-ink-5: #14051a;
+    --cat-mark-0: var(--cat-0);
+    --cat-mark-1: var(--cat-1);
+    --cat-mark-2: var(--cat-2);
+    --cat-mark-3: var(--cat-3);
+    --cat-mark-4: var(--cat-4);
+    --cat-mark-5: var(--cat-5);
+    --glow-strength: 0.55;
+    --particle-alpha: 0.9;
+    --aurora-strength: 34%;
+    --sheen-strength: 7%;
+    --underline-boost: 1;
+    --shadow-float: 0 16px 40px -14px rgb(0 0 0 / 0.7), 0 2px 8px -2px rgb(0 0 0 / 0.45);
+    --shadow-panel: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 18px 40px -26px rgb(0 0 0 / 0.75);
+    --shadow-lift: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 24px 48px -24px rgb(0 0 0 / 0.85);
+    --shadow-inset: inset 0 1px 0 rgb(255 255 255 / 0.05);
+  }
+}
+
+/*
+ * Izvedeni haze tokeni. Deklarišu se i na korenu i na svakom `haze-scope` elementu,
+ * jer se `var()` razrešava tamo gde je promenljiva deklarisana: element koji lokalno
+ * postavi `--haze` (koren aplikacije, kartica stanice) mora dobiti i svoje izvedene boje.
+ */
+:root,
+.haze-scope {
+  --haze-faint: color-mix(in oklab, var(--haze) calc(var(--glow-strength) * 14%), transparent);
+  --haze-soft: color-mix(in oklab, var(--haze) calc(var(--glow-strength) * 30%), transparent);
+  --haze-glow: color-mix(in oklab, var(--haze) calc(var(--glow-strength) * 60%), transparent);
+  --haze-edge: color-mix(in oklab, var(--haze) calc(var(--glow-strength) * 70%), var(--border-strong));
+}
+
+.haze-scope {
+  transition: --haze 1.2s ease;
+}
+
+/*
+ * Gornja ivica za lepljive elemente stranica (zaglavlja tabela …), ispod traka ljuske.
+ * AppShell meri trake i postavlja `--topbar-h` / `--mobilebar-h`; ovde su rezervne vrednosti.
+ * Telefon: lepljiva je samo mobilna traka; desktop: demo traka + gornja traka.
+ */
+.shell-root {
+  --shell-sticky-top: var(--mobilebar-h, 99px);
+}
+
+@media (min-width: 1024px) {
+  .shell-root {
+    --shell-sticky-top: calc(var(--banner-h, 0px) + var(--topbar-h, 65px));
+  }
+}
+
+/* Položen telefon: mobilna traka nije lepljiva, pa zaglavlja tabela lepe uz sam vrh. */
+@media (max-width: 1023px) and (max-height: 500px) {
+  .shell-root {
+    --shell-sticky-top: 0px;
+  }
+}
+
+/* Skok na sidro (npr. „O podacima“) ne sme da sakrije naslov ispod lepljivih traka. */
+.shell-root [id] {
+  scroll-margin-top: calc(var(--shell-sticky-top) + 16px);
+}
+
+@theme {
+  /* Uklanja podrazumevanu Tailwind paletu: komponente smeju samo tokene ispod. */
+  --color-*: initial;
+  --font-*: initial;
+
+  --font-heading: 'Sora', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* Radijusi po ulozi: kontrole 10, pločice 14, paneli ljuske 20, čipovi pun krug. */
+  --radius-ctl: 10px;
+  --radius-card: 14px;
+  --radius-tile: 14px;
+  --radius-panel: 20px;
+
+  --shadow-float: var(--shadow-float);
+  --shadow-panel: var(--shadow-panel);
+  --shadow-lift: var(--shadow-lift);
+
+  --animate-pulse-live: live-pulse 2.4s cubic-bezier(0.2, 0.7, 0.2, 1) infinite;
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-page-2: var(--page-2);
+  --color-panel: var(--panel);
+  --color-panel-solid: var(--panel-solid);
+  --color-card: var(--card);
+  --color-card-2: var(--card-2);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-grid: var(--grid);
+  /* `text-faint` (i text-faint/60 …) koristi tekstualni ton; Tailwind v4 za text-* prvo traži
+     --text-color-*, pa tek onda --color-*. fill-/stroke-/border-/bg-faint ostaju na `--faint`. */
+  --text-color-faint: var(--faint-text);
+
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-soft-ink: var(--accent-soft-ink);
+
+  --color-haze: var(--haze);
+
+  --color-danger: var(--danger);
+  --color-danger-ink: var(--danger-ink);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-soft-ink: var(--danger-soft-ink);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-ok-soft-ink: var(--ok-soft-ink);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-soft-ink: var(--warn-soft-ink);
+
+  --color-cat-0: var(--cat-0);
+  --color-cat-1: var(--cat-1);
+  --color-cat-2: var(--cat-2);
+  --color-cat-3: var(--cat-3);
+  --color-cat-4: var(--cat-4);
+  --color-cat-5: var(--cat-5);
+  --color-cat-ink-0: var(--cat-ink-0);
+  --color-cat-ink-1: var(--cat-ink-1);
+  --color-cat-ink-2: var(--cat-ink-2);
+  --color-cat-ink-3: var(--cat-ink-3);
+  --color-cat-ink-4: var(--cat-ink-4);
+  --color-cat-ink-5: var(--cat-ink-5);
+  --color-cat-mark-0: var(--cat-mark-0);
+  --color-cat-mark-1: var(--cat-mark-1);
+  --color-cat-mark-2: var(--cat-mark-2);
+  --color-cat-mark-3: var(--cat-mark-3);
+  --color-cat-mark-4: var(--cat-mark-4);
+  --color-cat-mark-5: var(--cat-mark-5);
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+
+  html {
+    background-color: var(--page);
+    color: var(--ink);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100dvh;
+    background-color: var(--page);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--accent-soft-ink);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  svg text {
+    user-select: none;
+  }
+
+  select option {
+    background-color: var(--panel-solid);
+    color: var(--ink);
+  }
+
+  dialog {
+    color: var(--ink);
+  }
+
+  dialog::backdrop {
+    background: color-mix(in oklab, var(--page) 62%, transparent);
+    backdrop-filter: blur(6px);
+  }
+
+  /*
+   * Kontejner sa skrolom je blok sadržavanja za apsolutne potomke (npr. `sr-only` tekst u
+   * tabelama): inače oni „beže“ iz skrol okvira do najbližeg pozicioniranog pretka (stakleni
+   * panel) i produžavaju stranu praznim prostorom. Nulta specifičnost – utility klase pobeđuju.
+   */
+  :where(.overflow-auto, .overflow-x-auto, .overflow-y-auto, .overflow-scroll, .scroll-row) {
+    position: relative;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Komponente efekata (GlassPanel, aurora, marquee …)                  */
+/* ------------------------------------------------------------------ */
+
+@layer components {
+  /*
+   * Staklo: providna ispuna (padding-box) preko gradijentne linije ivice (border-box).
+   * Linija je u boji izmaglice gore levo i gasi se ka dole desno. `::before` je blagi
+   * sjaj izmaglice, `::after` je reflektor koji prati pokazivač (samo uređaji sa hover-om).
+   * Ne koristiti before:/after: klase na samom panelu – zauzete su.
+   */
+  .glass {
+    --glass-fill: var(--panel);
+    --glass-radius: var(--radius-panel);
+    --glass-sheen-size: 85% 65%;
+    position: relative;
+    isolation: isolate;
+    border: 1px solid transparent;
+    border-radius: var(--glass-radius);
+    background:
+      linear-gradient(var(--glass-fill), var(--glass-fill)) padding-box,
+      linear-gradient(
+          158deg,
+          var(--haze-edge) 0%,
+          var(--border) 34%,
+          var(--border) 72%,
+          color-mix(in oklab, var(--border-strong) 80%, transparent) 100%
+        )
+        border-box;
+    box-shadow: var(--shadow-panel);
+  }
+
+  .glass::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: calc(var(--glass-radius) - 1px);
+    /* Blag sjaj: u tamnoj temi jačine `--haze-faint` (jača izmaglica na svakom panelu i
+       pločici daje maslinaste/braon uglove), u svetloj kao ranije (`--sheen-strength`). Boja se
+       meša ovde, pa prati i lokalnu izmaglicu (kartica stanice). Heroj ima jači sjaj ispod. */
+    background: radial-gradient(
+      var(--glass-sheen-size) at 0% 0%,
+      color-mix(in oklab, var(--haze) calc(var(--glow-strength) * var(--sheen-strength)), transparent),
+      transparent 72%
+    );
+    pointer-events: none;
+  }
+
+  .glass::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: calc(var(--glass-radius) - 1px);
+    background: radial-gradient(340px circle at var(--mx, 50%) var(--my, 0%), var(--haze-faint), transparent 70%);
+    opacity: 0;
+    transition: opacity 0.35s ease;
+    pointer-events: none;
+  }
+
+  @media (hover: hover) {
+    .glass[data-spot='on']::after {
+      opacity: 1;
+    }
+  }
+
+  .glass--hero {
+    --glass-sheen-size: 70% 90%;
+    background:
+      linear-gradient(var(--glass-fill), var(--glass-fill)) padding-box,
+      linear-gradient(150deg, var(--haze-edge) 0%, var(--border) 45%, var(--haze-faint) 100%) border-box;
+    /* Bez ručnog -webkit- reda: Lightning CSS sam dodaje prefiks, a ručni par je spajao u
+       samo -webkit- verziju koju Chromium ne podržava (staklo bez zamućenja). */
+    backdrop-filter: blur(18px) saturate(140%);
+    box-shadow:
+      var(--shadow-panel),
+      0 30px 80px -40px var(--haze-glow);
+  }
+
+  .glass--hero::before {
+    background: radial-gradient(var(--glass-sheen-size) at 0% 0%, var(--haze-soft), transparent 72%);
+  }
+
+  .glass--tile {
+    --glass-radius: var(--radius-tile);
+    --glass-sheen-size: 120% 70%;
+  }
+
+  .glass--solid {
+    --glass-fill: var(--panel-solid);
+  }
+
+  .glass--interactive {
+    transition:
+      transform 0.2s cubic-bezier(0.2, 0.7, 0.2, 1),
+      box-shadow 0.2s ease;
+  }
+
+  @media (hover: hover) {
+    .glass--interactive:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-lift);
+    }
+  }
+
+  /* Staklene trake ljuske (bočna traka, gornje trake, donja navigacija). */
+  .shell-bar {
+    background-color: color-mix(in oklab, var(--panel-solid) 72%, transparent);
+    backdrop-filter: blur(20px) saturate(150%);
+  }
+
+  /* Aurora: 2–3 velika radijalna gradijenta u boji izmaglice i akcenta, sporo plutaju. */
+  .aurora {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background: linear-gradient(180deg, var(--page) 0%, var(--page-2) 100%);
+  }
+
+  .aurora__blob {
+    position: absolute;
+    width: clamp(420px, 70vmax, 1100px);
+    aspect-ratio: 1;
+    border-radius: 50%;
+    will-change: transform;
+  }
+
+  .aurora__blob--a {
+    top: -420px;
+    left: -300px;
+    /* Izmaglica se meša ovde (ne preko izvedenog tokena na :root/.dark – oni se razrešavaju
+       unutar `.haze-scope`); `--aurora-strength` je po temi (svetla 60 %, tamna 34 %). */
+    background: radial-gradient(
+      closest-side,
+      color-mix(in oklab, var(--haze) calc(var(--glow-strength) * var(--aurora-strength)), transparent),
+      transparent
+    );
+    animation: aurora-drift-a 78s ease-in-out infinite alternate;
+  }
+
+  .aurora__blob--b {
+    top: 80px;
+    right: -380px;
+    background: radial-gradient(
+      closest-side,
+      color-mix(in oklab, var(--accent) calc(var(--glow-strength) * 34%), transparent),
+      transparent
+    );
+    animation: aurora-drift-b 92s ease-in-out infinite alternate;
+  }
+
+  .aurora__blob--c {
+    top: 58vh;
+    left: 22%;
+    width: clamp(360px, 52vmax, 820px);
+    /* Polovina jačine mrlje „a“: u svetloj temi isto kao ranije (--haze-soft), u tamnoj blaže. */
+    background: radial-gradient(
+      closest-side,
+      color-mix(in oklab, var(--haze) calc(var(--glow-strength) * var(--aurora-strength) * 0.5), transparent),
+      transparent
+    );
+    animation: aurora-drift-c 66s ease-in-out infinite alternate;
+  }
+
+  /* Tihe zvezde – samo tamna tema. */
+  .aurora__stars {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    background-image:
+      radial-gradient(1px 1px at 8% 14%, rgb(234 242 249 / 0.7), transparent 70%),
+      radial-gradient(1px 1px at 23% 41%, rgb(234 242 249 / 0.5), transparent 70%),
+      radial-gradient(1.5px 1.5px at 37% 9%, rgb(234 242 249 / 0.6), transparent 70%),
+      radial-gradient(1px 1px at 52% 27%, rgb(234 242 249 / 0.45), transparent 70%),
+      radial-gradient(1px 1px at 66% 12%, rgb(234 242 249 / 0.6), transparent 70%),
+      radial-gradient(1.5px 1.5px at 79% 33%, rgb(234 242 249 / 0.5), transparent 70%),
+      radial-gradient(1px 1px at 91% 7%, rgb(234 242 249 / 0.55), transparent 70%),
+      radial-gradient(1px 1px at 14% 72%, rgb(234 242 249 / 0.4), transparent 70%),
+      radial-gradient(1px 1px at 44% 63%, rgb(234 242 249 / 0.35), transparent 70%),
+      radial-gradient(1px 1px at 71% 81%, rgb(234 242 249 / 0.4), transparent 70%),
+      radial-gradient(1px 1px at 88% 58%, rgb(234 242 249 / 0.35), transparent 70%);
+  }
+
+  .dark .aurora__stars {
+    opacity: 0.55;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not(.light):not(.dark) .aurora__stars {
+      opacity: 0.55;
+    }
+  }
+
+  /* Pokretna traka: dve kopije sadržaja, pomeranje za -50 %; pauza na hover/fokus. */
+  .marquee {
+    mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+  }
+
+  .marquee__track {
+    display: flex;
+    width: max-content;
+    animation: marquee var(--marquee-duration, 60s) linear infinite;
+  }
+
+  /* Fokus tastature u traci (statičan red): bez prigušenih ivica – fokusirana stavka je cela jasna. */
+  .marquee[data-focus='true'] {
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+
+  .marquee:hover .marquee__track,
+  .marquee:focus-within .marquee__track,
+  .marquee[data-paused='true'] .marquee__track {
+    animation-play-state: paused;
+  }
+
+  /* Prsten: luk se „puni“ pri montiranju (od --ring-from do stvarne vrednosti). */
+  .ring-arc {
+    animation: ring-sweep 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+    transition: stroke-dashoffset 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+
+  .seg-arc {
+    animation: seg-sweep 0.65s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+    transition:
+      stroke-dasharray 0.6s cubic-bezier(0.2, 0.7, 0.2, 1),
+      stroke-dashoffset 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+
+  /* Linija sparkline-a se iscrtava (pathLength=1). */
+  .spark-line {
+    stroke-dasharray: 1;
+    animation: spark-draw 0.7s cubic-bezier(0.3, 0.6, 0.2, 1) backwards;
+  }
+
+  .spark-area {
+    animation: fade-in 0.7s ease-out backwards;
+  }
+
+  /* Prelazi stranica (View Transitions API): kratko gašenje pa uspon. */
+  html[data-vt='page'] .vt-page {
+    view-transition-name: page;
+  }
+
+  html[data-vt='page'] .vt-sidebar {
+    view-transition-name: sidebar;
+  }
+
+  html[data-vt='page'] .vt-topbar {
+    view-transition-name: topbar;
+  }
+
+  html[data-vt='page'] .vt-mtopbar {
+    view-transition-name: mtopbar;
+  }
+
+  html[data-vt='page'] .vt-bottomnav {
+    view-transition-name: bottomnav;
+  }
+
+  /* Bez View Transitions API: isti uspon kao CSS animacija pri montiranju stranice. */
+  .page-enter {
+    animation: rise 0.32s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  }
+}
+
+::view-transition-old(page) {
+  animation: vt-out 0.16s ease-in both;
+}
+
+::view-transition-new(page) {
+  animation: vt-in 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* Kružno otkrivanje teme: stari snimak stoji, novi se otkriva krugom iz dugmeta (JS animira clip-path). */
+html[data-vt='theme']::view-transition-old(root),
+html[data-vt='theme']::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+/* ------------------------------------------------------------------ */
+/* Utility klase                                                       */
+/* ------------------------------------------------------------------ */
+
+/* Tabelarne cifre – samo u kolonama i na osama, nikad na velikim brojevima. */
+@utility tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mono „eyebrow“: velika slova, razmak, prigušeno – iznad naslova i za vremenske oznake. */
+@utility eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/*
+ * Oznaka polutanta ili jedinice uz vrednost („PM2.5“, „NO₂“, „µg/m³“): 12 px na telefonu,
+ * 11 px od `sm`; IBM Plex Sans polupodebljano – indeksi ₂/₃ su čitljiviji nego u mono od 10 px.
+ * Boju (text-muted / text-faint) bira komponenta.
+ */
+@utility unit-label {
+  font-family: var(--font-body);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  @media (min-width: 40rem) {
+    font-size: 11px;
+  }
+}
+
+/* Podvlačenje u boji izmaglice (reč kategorije u naslovu heroja – tekst ostaje u ink boji). */
+/* Pernat sjaj ispod x-visine, bez tvrdih ivica: ne prekriva silazne poteze (j, p). */
+@utility haze-underline {
+  background-image: linear-gradient(
+    transparent 0 70%,
+    color-mix(in oklab, var(--haze) calc(var(--glow-strength) * var(--underline-boost, 1) * 60%), transparent) 84%,
+    color-mix(in oklab, var(--haze) calc(var(--glow-strength) * var(--underline-boost, 1) * 35%), transparent) 92%,
+    transparent 100%
+  );
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  padding-inline: 0.06em;
+}
+
+/* Spoljni sjaj u boji izmaglice (heroj, istaknuta pločica). */
+@utility haze-glow {
+  box-shadow:
+    0 0 0 1px var(--haze-soft),
+    0 24px 60px -28px var(--haze-glow);
+}
+
+/* Blagi radijalni sjaj izmaglice kao pozadina (bez stakla). */
+@utility haze-sheen {
+  background-image: radial-gradient(120% 90% at 0% 0%, var(--haze-soft), transparent 70%);
+}
+
+/* Lokalna boja izmaglice: element postavlja `--haze` i dobija svoje izvedene tokene. */
+@utility haze-local {
+  --haze-faint: color-mix(in oklab, var(--haze) calc(var(--glow-strength) * 14%), transparent);
+  --haze-soft: color-mix(in oklab, var(--haze) calc(var(--glow-strength) * 30%), transparent);
+  --haze-glow: color-mix(in oklab, var(--haze) calc(var(--glow-strength) * 60%), transparent);
+  --haze-edge: color-mix(in oklab, var(--haze) calc(var(--glow-strength) * 70%), var(--border-strong));
+}
+
+/* Donji razmak za sadržaj iznad donje navigacije (telefon; položen telefon ima nižu traku). */
+@utility pb-safe-nav {
+  padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  @media (max-width: 1023px) and (max-height: 500px) {
+    padding-bottom: calc(60px + env(safe-area-inset-bottom));
+  }
+}
+
+/*
+ * Vodoravni razmak ivice (`px-safe-4` = 16 px, `sm:px-safe-6` …) koji poštuje zarez i
+ * zaobljenje ekrana položenog telefona (`viewport-fit=cover` u index.html): uzima veće od
+ * razmaka i `env(safe-area-inset-left/right)`.
+ */
+@utility px-safe-* {
+  padding-left: max(calc(var(--spacing) * --value(integer)), env(safe-area-inset-left));
+  padding-right: max(calc(var(--spacing) * --value(integer)), env(safe-area-inset-right));
+}
+
+/*
+ * Veća površina za dodir (≥ 44 × 44 px) na uređajima sa grubim pokazivačem, bez promene
+ * izgleda: nevidljiv `::after` centriran na kontroli (dodir na njega pogađa samu kontrolu).
+ * Ne koristiti na `.glass` elementima (njihov `::after` je reflektor) ni na elementima koji su
+ * već `absolute`/`fixed`. Roditelj sa `overflow` seče proširenje – dajte mu vertikalni razmak.
+ */
+@utility touch-target {
+  position: relative;
+  @media (pointer: coarse) {
+    &::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: max(100%, 44px);
+      height: max(100%, 44px);
+      transform: translate(-50%, -50%);
+    }
+  }
+}
+
+/* Isto, ali bez vodoravnog širenja – za kontrole čiji su susedi bliže od 6 px (segmenti, čipovi). */
+@utility touch-target-y {
+  position: relative;
+  @media (pointer: coarse) {
+    &::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      width: 100%;
+      height: max(100%, 44px);
+      transform: translateY(-50%);
+    }
+  }
+}
+
+/* Horizontalni red bez vidljive trake za skrolovanje (čipovi sočiva na telefonu). */
+@utility scroll-row {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Skelet za učitavanje (svetlucanje). */
+@utility skeleton {
+  position: relative;
+  overflow: hidden;
+  background-color: color-mix(in oklab, var(--muted) 12%, transparent);
+  border-radius: 8px;
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in oklab, var(--ink) 9%, transparent),
+      transparent
+    );
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+}
+
+@utility spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Blago pojavljivanje pri učitavanju: počinje vidljivo (0,4) i završava za 0,35 s. */
+@utility rise-in {
+  animation: rise 0.35s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+
+/* ------------------------------------------------------------------ */
+/* Animacije                                                           */
+/* ------------------------------------------------------------------ */
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Zadržano zbog starih referenci. */
+@keyframes skeleton-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0.4;
+    transform: translateY(8px);
+  }
+}
+
+/* Zadržano zbog starih referenci. */
+@keyframes rise-in {
+  from {
+    opacity: 0.4;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes live-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  70%,
+  100% {
+    transform: scale(2.7);
+    opacity: 0;
+  }
+}
+
+@keyframes marquee {
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+@keyframes ring-sweep {
+  from {
+    stroke-dashoffset: var(--ring-from);
+  }
+}
+
+@keyframes seg-sweep {
+  from {
+    stroke-dasharray: 0 var(--seg-c);
+  }
+}
+
+@keyframes spark-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+
+@keyframes aurora-drift-a {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(14vw, 10vh, 0) scale(1.12);
+  }
+}
+
+@keyframes aurora-drift-b {
+  from {
+    transform: translate3d(0, 0, 0) scale(1.05);
+  }
+  to {
+    transform: translate3d(-12vw, 16vh, 0) scale(0.92);
+  }
+}
+
+@keyframes aurora-drift-c {
+  from {
+    transform: translate3d(0, 0, 0) scale(0.95);
+  }
+  to {
+    transform: translate3d(10vw, -12vh, 0) scale(1.1);
+  }
+}
+
+@keyframes vt-out {
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes vt-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+/*
+ * Visok kontrast (Windows „Kontrastne teme“, forced-colors): pregledač zamenjuje boje
+ * sistemskim, pa bi ispune SEPA kategorija (toplotne mape, trake, tačke) nestale. Oznake
+ * podataka (`data-mark` atribut ili klasa `.data-mark`) zadržavaju svoje boje, a ćelije
+ * toplotnih mapa dobijaju obris u boji teksta (nepotpun period – isprekidan). Tekst i
+ * kontrole i dalje prate sistemske boje.
+ */
+@media (forced-colors: active) {
+  .data-mark,
+  [data-mark] {
+    forced-color-adjust: none;
+  }
+
+  .heat-cell {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+
+  .heat-cell[data-partial] {
+    outline-style: dashed;
+  }
+}
+
+/*
+ * Smanjeno kretanje: svaka animacija i prelaz se neutrališu. Canvas crta jedan statičan
+ * kadar, brojači skaču na konačnu vrednost, a pokretna traka postaje red za skrolovanje
+ * (to rešavaju same komponente preko `useReducedMotion`).
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}

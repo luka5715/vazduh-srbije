@@ -1,0 +1,363 @@
+/*
+ * Stranica „Mapa“: markeri sa sjajem, pulsirajući oreol (kategorija ≥ Zagađen), talasi
+ * oko izabrane stanice i sloj „izmaglice“ (mutni krugovi u boji kategorije).
+ *
+ * Samo tokeni iz src/main.css (var(--cat-N), --panel-solid, --accent …). Boja markera
+ * dolazi kroz `--mk` (inline stil). Globalni blok za smanjeno kretanje (main.css) gasi
+ * animacije posle jednog trenutnog ciklusa – osnovna stanja ispod su zato smislena i
+ * statična: oreol ostaje kao blag prsten, talasi se ne vide.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Okvir mape                                                          */
+/* ------------------------------------------------------------------ */
+
+.smap {
+  /* Svetla tema: siva „papirna“ mapa sa belim granicama okruga. */
+  --mk-glow-alpha: 0.42;
+  --haze-alpha: 0.42;
+  --district-fill: color-mix(in oklab, var(--ink) 9%, var(--panel-solid));
+  --district-fill-hover: color-mix(in oklab, var(--ink) 14%, var(--panel-solid));
+  --district-line: var(--panel-solid);
+}
+
+.dark .smap {
+  /* Tamna tema: okruzi kao blago osvetljeno tlo, granice u boji noćnog neba. */
+  --mk-glow-alpha: 0.7;
+  --haze-alpha: 0.62;
+  --district-fill: color-mix(in oklab, var(--ink) 5%, var(--panel-solid));
+  --district-fill-hover: color-mix(in oklab, var(--ink) 9%, var(--panel-solid));
+  --district-line: var(--page);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light):not(.dark) .smap {
+    --mk-glow-alpha: 0.7;
+    --haze-alpha: 0.62;
+    --district-fill: color-mix(in oklab, var(--ink) 5%, var(--panel-solid));
+    --district-fill-hover: color-mix(in oklab, var(--ink) 9%, var(--panel-solid));
+    --district-line: var(--page);
+  }
+}
+
+/* Obris zemlje lebdi nad panelom: blaga senka + sjaj u boji izmaglice mreže. */
+.smap__land {
+  filter: drop-shadow(0 16px 24px rgb(13 26 38 / 0.14)) drop-shadow(0 0 22px var(--haze-soft));
+}
+
+.dark .smap__land {
+  filter: drop-shadow(0 22px 30px rgb(0 0 0 / 0.45)) drop-shadow(0 0 26px var(--haze-soft));
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light):not(.dark) .smap__land {
+    filter: drop-shadow(0 22px 30px rgb(0 0 0 / 0.45)) drop-shadow(0 0 26px var(--haze-soft));
+  }
+}
+
+.smap__district {
+  fill: var(--district-fill);
+  stroke: var(--district-line);
+  stroke-width: 1.25px;
+  stroke-linejoin: round;
+  transition:
+    fill 0.2s ease,
+    opacity 0.3s ease;
+}
+
+.smap__district:hover {
+  fill: var(--district-fill-hover);
+}
+
+.smap__district[data-kosovo='true'] {
+  opacity: 0.4;
+}
+
+.smap__district[data-muted='true'] {
+  opacity: 0.55;
+}
+
+.smap__district[data-active='true'] {
+  fill: color-mix(in oklab, var(--accent) 16%, var(--panel-solid));
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+}
+
+.smap__graticule {
+  stroke: var(--grid);
+  stroke-width: 1px;
+}
+
+/* Mreža stepeni se blago gubi ka uglovima okvira (instrument, ne tabela). */
+.smap__graticule-layer {
+  -webkit-mask-image: radial-gradient(ellipse 78% 72% at 50% 50%, #000 58%, transparent 100%);
+  mask-image: radial-gradient(ellipse 78% 72% at 50% 50%, #000 58%, transparent 100%);
+}
+
+/* Segmenti trake raspodele u legendi glatko menjaju širinu pri promeni sočiva/okruga. */
+.smap__share {
+  min-width: 4px;
+  transition: flex-grow 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* Izmaglica: mešanje „screen“ u tamnoj (svetli nebo), „multiply“ u svetloj (boji papir). */
+.smap__haze {
+  mix-blend-mode: multiply;
+  opacity: var(--haze-alpha);
+  animation: smap-breathe 9s ease-in-out infinite alternate;
+}
+
+.dark .smap__haze {
+  mix-blend-mode: screen;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light):not(.dark) .smap__haze {
+    mix-blend-mode: screen;
+  }
+}
+
+/* Oznaka izmaglice u legendi: isti mutni krug kao na mapi (neutralna boja). */
+.smap__haze-key {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: radial-gradient(circle, color-mix(in oklab, var(--muted) 70%, transparent) 0%, color-mix(in oklab, var(--muted) 32%, transparent) 45%, transparent 100%);
+}
+
+/* ------------------------------------------------------------------ */
+/* Markeri                                                             */
+/* ------------------------------------------------------------------ */
+
+.mk {
+  --mk: var(--faint);
+  --mk-size: 12px;
+  position: absolute;
+  pointer-events: auto;
+  /* Fiksna ćelija veličine dugmeta: sjaj (veći od dugmeta) se centrira oko tačke i ne
+     širi mrežu – inače bi se tačka pomerila od stvarnog položaja stanice. */
+  display: grid;
+  grid-template: 100% / 100%;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+  border-radius: 9999px;
+  transition: opacity 0.3s ease;
+}
+
+.mk > span {
+  grid-area: 1 / 1;
+  border-radius: 9999px;
+  pointer-events: none;
+}
+
+.smap--compact .mk {
+  --mk-size: 9px;
+  width: 24px;
+  height: 24px;
+}
+
+/* Meki radijalni sjaj u boji kategorije iza tačke. */
+.mk__glow {
+  width: calc(var(--mk-size) * 3.4);
+  height: calc(var(--mk-size) * 3.4);
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--mk) 80%, transparent), transparent);
+  opacity: var(--mk-glow-alpha);
+}
+
+.mk__dot {
+  width: var(--mk-size);
+  height: var(--mk-size);
+  background: var(--mk);
+  box-shadow:
+    0 0 0 2px var(--panel-solid),
+    0 0 12px 1px color-mix(in oklab, var(--mk) 55%, transparent);
+  transition:
+    transform 0.18s cubic-bezier(0.2, 0.7, 0.2, 1),
+    width 0.18s ease,
+    height 0.18s ease;
+}
+
+/* Približna lokacija: šupalj prsten u boji kategorije. */
+.mk[data-kind='approx'] .mk__dot {
+  background: var(--panel-solid);
+  border: 3px solid var(--mk);
+}
+
+/* Bez svežih podataka: isprekidan sivi prsten, bez sjaja. */
+/* Bez svežih podataka: sivi prsten precrtan kosom crtom (kao znak „nema signala“), bez sjaja. */
+.mk[data-kind='stale'] .mk__dot,
+.mk-key[data-kind='stale'] .mk__dot {
+  background:
+    linear-gradient(135deg, transparent calc(50% - 1px), var(--muted) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)),
+    var(--panel-solid);
+  border: 2px solid var(--muted);
+}
+
+.mk[data-kind='stale'] .mk__dot {
+  box-shadow: 0 0 0 2px var(--panel-solid);
+}
+
+/* Bez vrednosti za sočivo: mala siva tačka. */
+.mk[data-kind='none'] .mk__dot {
+  width: calc(var(--mk-size) * 0.66);
+  height: calc(var(--mk-size) * 0.66);
+  background: var(--faint);
+  box-shadow: 0 0 0 2px var(--panel-solid);
+}
+
+.mk[data-kind='stale'] .mk__glow,
+.mk[data-kind='none'] .mk__glow,
+.mk[data-dim='true'] .mk__glow,
+.mk[data-dim='true'] .mk__halo {
+  display: none;
+}
+
+.mk[data-dim='true'] {
+  opacity: 0.32;
+}
+
+@media (hover: hover) {
+  .mk:hover .mk__dot {
+    transform: scale(1.3);
+  }
+
+  .mk[data-dim='true']:hover {
+    opacity: 0.85;
+  }
+}
+
+.mk:focus-visible {
+  outline-offset: 0;
+}
+
+/* Pulsirajući oreol za „Zagađen“ i lošije (statičan prsten uz smanjeno kretanje). */
+.mk__halo {
+  width: var(--mk-size);
+  height: var(--mk-size);
+  border: 2px solid var(--mk);
+  opacity: 0.4;
+  transform: scale(1.8);
+  animation: mk-pulse 2.4s cubic-bezier(0.2, 0.7, 0.2, 1) infinite;
+}
+
+/* Izabrana stanica: veća tačka, prsten akcenta i talasi. */
+.mk[data-selected='true'] {
+  --mk-size: 16px;
+}
+
+.mk[data-selected='true'] .mk__dot {
+  box-shadow:
+    0 0 0 2px var(--panel-solid),
+    0 0 0 4px var(--accent),
+    0 0 18px 4px color-mix(in oklab, var(--mk) 60%, transparent);
+}
+
+.mk__ripple {
+  width: var(--mk-size);
+  height: var(--mk-size);
+  border: 1.5px solid var(--accent);
+  opacity: 0;
+  animation: mk-ripple 2.8s cubic-bezier(0.15, 0.6, 0.3, 1) infinite;
+}
+
+.mk__ripple--late {
+  animation-delay: 1.4s;
+}
+
+/* Male oznake za legendu (iste klase, bez interakcije). */
+.mk-key {
+  --mk-size: 10px;
+  position: relative;
+  display: inline-grid;
+  grid-template: 100% / 100%;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.mk-key > span {
+  grid-area: 1 / 1;
+  border-radius: 9999px;
+}
+
+.mk-key[data-kind='approx'] .mk__dot {
+  background: transparent;
+  border: 2.5px solid var(--mk);
+}
+
+.mk-key[data-kind='none'] .mk__dot {
+  width: 7px;
+  height: 7px;
+  background: var(--faint);
+  box-shadow: none;
+}
+
+.mk-key .mk__dot {
+  box-shadow: none;
+}
+
+.mk-key .mk__halo {
+  animation: none;
+  transform: scale(1.35);
+  opacity: 0.55;
+}
+
+.mk-key[data-dim='true'] {
+  opacity: 0.35;
+}
+
+/* ------------------------------------------------------------------ */
+/* Detalji stanice                                                     */
+/* ------------------------------------------------------------------ */
+
+/* Pojasevi SEPA kategorija iza satnih linija (blago; kategoriju pojasa nosi traka pune boje
+   na levoj ivici, a granice tanka linija). */
+.hm-band {
+  opacity: 0.14;
+}
+
+.dark .hm-band {
+  opacity: 0.12;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light):not(.dark) .hm-band {
+    opacity: 0.12;
+  }
+}
+
+@keyframes mk-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.75;
+  }
+  75%,
+  100% {
+    transform: scale(3);
+    opacity: 0;
+  }
+}
+
+@keyframes mk-ripple {
+  0% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(3.6);
+    opacity: 0;
+  }
+}
+
+@keyframes smap-breathe {
+  from {
+    opacity: calc(var(--haze-alpha) * 0.78);
+  }
+  to {
+    opacity: var(--haze-alpha);
+  }
+}

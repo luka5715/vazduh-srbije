@@ -1,0 +1,26 @@
+{
+  "templateId": "vazduh-srbije",
+  "name": "Vazduh Srbije",
+  "description": "Kvalitet vazduha u Srbiji – SEPA državna mreža (Kosava Open Data API)",
+  "icon": "app",
+  "colors": {
+    "accent": "#0b6e99",
+    "accentDark": "#5cc3e8",
+    "background": "#f6f8fa",
+    "backgroundDark": "#0f161c"
+  },
+  "services": {
+    "auth": true,
+    "data": true,
+    "storage": false,
+    "staticHosting": true
+  },
+  "hasDabSchema": true,
+  "tokens": [
+    "__RAYFIN_API_URL__",
+    "__RAYFIN_PK__",
+    "__FABRIC_ITEM_ID__",
+    "__FABRIC_WORKSPACE_ID__",
+    "__FABRIC_PORTAL_URL__"
+  ]
+}

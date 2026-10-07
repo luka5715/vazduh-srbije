@@ -1,0 +1,163 @@
+/*
+ * Sinhronizacija – trake napretka, orbita merača svežine, tok podataka i odbrojavanje
+ * obaveštenja. Samo tokeni iz src/main.css (var(--…)), nijedna boja vezana za jednu temu.
+ *
+ * Smanjeno kretanje: globalni blok u main.css skraćuje svaku animaciju na trenutak, pa je
+ * OSNOVNI (statički) izgled svake klase ispod potpun i bez animacije: klizač neodređenog
+ * napretka stoji na sredini staze, tačka toka na sredini veze, orbita miruje.
+ */
+
+/* Neodređeni napredak (sinhronizacija nema korake): svetli segment klizi preko staze. */
+.sync-indeterminate {
+  position: relative;
+  overflow: hidden;
+}
+
+.sync-indeterminate::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 38%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--accent) 28%, var(--accent) 72%, transparent);
+  transform: translateX(82%);
+  animation: sync-slide 1.7s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+/* Isprekidana orbita oko merača svežine dok posao traje. */
+.sync-orbit {
+  position: absolute;
+  inset: -9px;
+  border-radius: 50%;
+  border: 1.5px dashed color-mix(in oklab, var(--accent) 60%, transparent);
+  animation: spin 12s linear infinite;
+  pointer-events: none;
+}
+
+/* Segment istorije koji se upravo učitava. */
+.sync-seg-current {
+  animation: sync-seg-pulse 1.3s ease-in-out infinite;
+}
+
+/*
+ * Tok podataka: „paket“ putuje niz vezu između dva koraka. Nosač je visok kao veza i klizi
+ * SAMO transformacijom (bez posla rasporeda u svakom kadru): tačka stoji na sredini nosača,
+ * pa translateY(−50 %) → (+50 %) vodi tačku od vrha do dna veze. Bez animacije (smanjeno
+ * kretanje) nosač miruje i tačka je na sredini veze. Van ekrana se animacija pauzira.
+ */
+.sync-flow-track {
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 7px;
+  margin-left: -3.5px;
+  animation: sync-flow 2.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  animation-delay: var(--flow-delay, 0s);
+  will-change: transform, opacity;
+}
+
+.sync-flow-dot {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+.sync-flow[data-paused='true'] .sync-flow-track {
+  animation-play-state: paused;
+}
+
+/* Odbrojavanje do automatskog zatvaranja obaveštenja (pauzira se na hover/fokus). */
+.sync-countdown {
+  transform-origin: left center;
+  animation: sync-countdown var(--countdown, 9s) linear forwards;
+}
+
+.sync-countdown[data-paused='true'] {
+  animation-play-state: paused;
+}
+
+@keyframes sync-slide {
+  from {
+    transform: translateX(-105%);
+  }
+  to {
+    transform: translateX(268%);
+  }
+}
+
+@keyframes sync-seg-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes sync-flow {
+  0% {
+    transform: translateY(-50%);
+    opacity: 0;
+  }
+  18% {
+    opacity: 1;
+  }
+  82% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(50%);
+    opacity: 0;
+  }
+}
+
+@keyframes sync-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* Heroj stranice: naslov levo, merač svežine desno; na telefonu merač stoji pored naslova. */
+.sync-hero__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'head gauge'
+    'body body';
+  column-gap: 14px;
+  row-gap: 18px;
+}
+
+.sync-hero__head {
+  grid-area: head;
+}
+
+.sync-hero__gauge {
+  grid-area: gauge;
+}
+
+.sync-hero__body {
+  grid-area: body;
+}
+
+@media (min-width: 768px) {
+  .sync-hero__grid {
+    grid-template-areas:
+      'head gauge'
+      'body gauge';
+    grid-template-rows: auto 1fr;
+    column-gap: 44px;
+    row-gap: 20px;
+  }
+
+  .sync-hero__gauge {
+    align-self: center;
+  }
+}

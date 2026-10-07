@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="sr-Latn">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="Kvalitet vazduha u Srbiji – SEPA državna mreža automatskog monitoringa, satne vrednosti i 30-dnevna istorija." />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#edf2f7" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#070c14" />
+    <title>Vazduh Srbije</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b6e99'/%3E%3Cpath d='M7 12h11a3 3 0 1 0-3-3M7 17h16a3 3 0 1 1-3 3M7 22h9a2.5 2.5 0 1 1-2.5 2.5' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin="anonymous" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+      crossorigin="anonymous"
+    />
+    <script>
+      // Tema pre prvog crtanja: sačuvan izbor korisnika ili podešavanje sistema.
+      (function () {
+        try {
+          var root = document.documentElement;
+          var host = root.getAttribute('data-theme') || root.getAttribute('data-appearance');
+          var stored = localStorage.getItem('vazduh-theme');
+          var dark =
+            stored === 'dark' ||
+            (stored !== 'light' &&
+              (host === 'dark' || (host !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)));
+          root.classList.add(dark ? 'dark' : 'light');
+          // Traka pregledača prati izabranu temu (ne samo sistemsku) – isto radi applyTheme.
+          var metas = document.querySelectorAll('meta[name="theme-color"]');
+          for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', dark ? '#070c14' : '#edf2f7');
+        } catch (e) {
+          /* bez localStorage – ostaje CSS fallback preko prefers-color-scheme */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

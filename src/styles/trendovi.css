@@ -1,0 +1,35 @@
+/*
+ * Stranica Trendovi – efekti grafikona (samo transform/stroke, bez boja vezanih za temu).
+ * Smanjeno kretanje: globalni blok u main.css gasi sve animacije ispod.
+ */
+
+/* Stubovi trenda rastu od osnovice pri montiranju (kratko, stepenasto po danu). */
+.trend-col {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: trend-grow 0.48s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  animation-delay: var(--trend-delay, 0ms);
+}
+
+@keyframes trend-grow {
+  from {
+    transform: scaleY(0.18);
+  }
+}
+
+/* Okruzi: spojnica se iscrtava od proseka 24 h ka vrednosti sada … */
+.db-link {
+  stroke-dasharray: 1;
+  animation: spark-draw 0.6s cubic-bezier(0.3, 0.6, 0.2, 1) backwards;
+}
+
+/* … a puna tačka („sada“) klizi iz položaja proseka na svoje mesto. */
+.db-now {
+  animation: db-slide 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+
+@keyframes db-slide {
+  from {
+    transform: translateX(var(--db-from, 0px));
+  }
+}

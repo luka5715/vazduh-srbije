@@ -1,0 +1,375 @@
+/*
+ * Stranica Stanice – tabela, kartice, čipovi okruga i raspodela.
+ * Samo tokeni iz src/main.css (var(--…)); boja reda/kartice je `--st-tint` (kategorija
+ * sočiva ili prigušena). Smanjeno kretanje: globalni blok u main.css gasi sve animacije.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Tabela                                                              */
+/* ------------------------------------------------------------------ */
+
+.st-table {
+  /* Visina lepljivih traka ljuske (meri je AppShell, vidi `.shell-root` u main.css). */
+  --st-sticky-top: var(--shell-sticky-top, 65px);
+  /* Boja izmaglice mreže za istaknutu kolonu; redovi lokalno menjaju `--haze`, ovo ostaje. */
+  --st-col: var(--haze);
+}
+
+
+.st-col-lens {
+  width: 236px;
+}
+
+.st-col-trend {
+  width: 180px;
+}
+
+.st-col-compact {
+  width: 58px;
+}
+
+.st-col-go {
+  width: 36px;
+}
+
+/* Kolone polutanata tek kad ima mesta (kontejner stranice ≥ 56rem). */
+.st-col-compact,
+.st-compact {
+  display: none;
+}
+
+@container (min-width: 56rem) {
+  .st-col-compact {
+    display: table-column;
+  }
+
+  .st-compact {
+    display: table-cell;
+    padding-inline: 8px;
+  }
+}
+
+.st-th {
+  position: sticky;
+  top: var(--st-sticky-top);
+  z-index: 2;
+  padding: 12px 10px 11px;
+  background: var(--panel-solid);
+  box-shadow: inset 0 -1px 0 var(--border);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.st-th--first {
+  padding-left: 20px;
+}
+
+.st-th--last {
+  padding-right: 16px;
+}
+
+/* Istaknuta kolona sočiva: blaga traka u boji izmaglice kroz celu kolonu. */
+.st-th.st-lens {
+  background:
+    linear-gradient(color-mix(in oklab, var(--st-col) calc(var(--glow-strength) * 12%), transparent), color-mix(in oklab, var(--st-col) calc(var(--glow-strength) * 12%), transparent)),
+    var(--panel-solid);
+}
+
+.st-td.st-lens {
+  background-image: linear-gradient(
+    color-mix(in oklab, var(--st-col) calc(var(--glow-strength) * 7%), transparent),
+    color-mix(in oklab, var(--st-col) calc(var(--glow-strength) * 7%), transparent)
+  );
+}
+
+.st-compact--lens {
+  background-image: linear-gradient(
+    color-mix(in oklab, var(--st-col) calc(var(--glow-strength) * 7%), transparent),
+    color-mix(in oklab, var(--st-col) calc(var(--glow-strength) * 7%), transparent)
+  );
+}
+
+.st-td {
+  padding: 12px 10px;
+  vertical-align: middle;
+  border-top: 1px solid var(--grid);
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.st-row:first-child > .st-td {
+  border-top-color: transparent;
+}
+
+.st-td--first {
+  padding-left: 20px;
+  max-width: 0;
+  width: 100%;
+}
+
+.st-td--last {
+  padding-right: 16px;
+}
+
+.st-row {
+  cursor: pointer;
+  --st-edge: color-mix(in oklab, var(--st-tint) calc(var(--glow-strength) * 80%), var(--border));
+}
+
+/*
+ * Sjaj reda na hover/fokus u boji kategorije: ispuna ćelija + tanka linija oko celog reda
+ * (gore/dole na svim ćelijama, levo i desno na krajnjim) i meki radijalni sjaj sa leve strane.
+ */
+.st-row:hover > .st-td,
+.st-row:focus-within > .st-td {
+  background-color: color-mix(in oklab, var(--st-tint) calc(var(--glow-strength) * 14%), transparent);
+  box-shadow:
+    inset 0 1px 0 var(--st-edge),
+    inset 0 -1px 0 var(--st-edge);
+}
+
+.st-row:hover > .st-td--first,
+.st-row:focus-within > .st-td--first {
+  border-radius: 12px 0 0 12px;
+  background-image: radial-gradient(
+    120% 160% at 0% 50%,
+    color-mix(in oklab, var(--st-tint) calc(var(--glow-strength) * 34%), transparent),
+    transparent 70%
+  );
+  box-shadow:
+    inset 1px 0 0 var(--st-edge),
+    inset 0 1px 0 var(--st-edge),
+    inset 0 -1px 0 var(--st-edge);
+}
+
+.st-row:hover > .st-td--last,
+.st-row:focus-within > .st-td--last {
+  border-radius: 0 12px 12px 0;
+  box-shadow:
+    inset -1px 0 0 var(--st-edge),
+    inset 0 1px 0 var(--st-edge),
+    inset 0 -1px 0 var(--st-edge);
+}
+
+/* Fokus sa tastature (dugme naziva) – prsten akcenta oko celog reda. */
+.st-row:has(.st-name:focus-visible) > .st-td {
+  box-shadow:
+    inset 0 2px 0 var(--accent),
+    inset 0 -2px 0 var(--accent);
+}
+
+.st-row:has(.st-name:focus-visible) > .st-td--first {
+  box-shadow:
+    inset 2px 0 0 var(--accent),
+    inset 0 2px 0 var(--accent),
+    inset 0 -2px 0 var(--accent);
+}
+
+.st-row:has(.st-name:focus-visible) > .st-td--last {
+  box-shadow:
+    inset -2px 0 0 var(--accent),
+    inset 0 2px 0 var(--accent),
+    inset 0 -2px 0 var(--accent);
+}
+
+.st-name {
+  color: var(--ink);
+  border-radius: 4px;
+}
+
+.st-name:focus-visible {
+  outline: none;
+}
+
+.st-go {
+  color: var(--faint);
+  opacity: 0.45;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    color 0.15s ease;
+}
+
+.st-row:hover .st-go,
+.st-row:focus-within .st-go {
+  opacity: 1;
+  color: var(--ink);
+  transform: translate(1px, -1px);
+}
+
+/* Zastarele stanice: ceo red prigušen, bez boje kategorije. */
+.st-row[data-stale] .st-name {
+  color: var(--muted);
+}
+
+/* Poslednja otvorena stanica (iz `?station=`): tanka linija akcenta oko naziva. */
+.st-row[data-current] > .st-td--first {
+  background-image: linear-gradient(90deg, var(--accent-soft), transparent 80%);
+}
+
+.st-sort {
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------ */
+/* Traka SEPA skale i mini grafikon                                    */
+/* ------------------------------------------------------------------ */
+
+.st-bar__fill {
+  transform-origin: left center;
+  animation: st-bar-grow 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  transition: width 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.st-spark {
+  --st-spark: color-mix(in oklab, var(--muted) 85%, transparent);
+}
+
+.st-row:hover .st-spark,
+.st-row:focus-within .st-spark,
+.st-card:hover .st-spark {
+  --st-spark: var(--ink);
+}
+
+/* ------------------------------------------------------------------ */
+/* Kartice (telefon)                                                   */
+/* ------------------------------------------------------------------ */
+
+.st-card__link {
+  color: var(--ink);
+  border-radius: 4px;
+}
+
+/* Rastegnuto dugme: cela kartica je klikabilna, a tab-stop je jedan (naziv). */
+.st-card__link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: var(--radius-tile);
+}
+
+.st-card__link:focus-visible {
+  outline: none;
+}
+
+.st-card:has(.st-card__link:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.st-card--stale .st-card__link {
+  color: var(--muted);
+}
+
+.st-card--current {
+  box-shadow:
+    var(--shadow-panel),
+    0 0 0 1px color-mix(in oklab, var(--accent) 45%, transparent);
+}
+
+/* Blagi uspon pri montiranju (počinje vidljivo – 0,4 – i završava za ~0,5 s). */
+.st-card--enter,
+.st-row--enter {
+  animation: st-rise 0.36s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+
+/* ------------------------------------------------------------------ */
+/* Čipovi okruga                                                       */
+/* ------------------------------------------------------------------ */
+
+.st-chips__row {
+  --st-fade-start: 0px;
+  --st-fade-end: 0px;
+  scroll-padding-inline: 40px;
+  mask-image: linear-gradient(90deg, transparent 0, #000 var(--st-fade-start), #000 calc(100% - var(--st-fade-end)), transparent 100%);
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 var(--st-fade-start), #000 calc(100% - var(--st-fade-end)), transparent 100%);
+}
+
+.st-chips--more-start .st-chips__row {
+  --st-fade-start: 36px;
+}
+
+.st-chips--more-end .st-chips__row {
+  --st-fade-end: 36px;
+}
+
+.st-chips__nav {
+  position: absolute;
+  top: 50%;
+  display: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-top: -14px;
+  border-radius: 9999px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel-solid);
+  color: var(--muted);
+  box-shadow: var(--shadow-float);
+  transition: color 0.15s ease;
+}
+
+.st-chips__nav:hover {
+  color: var(--ink);
+}
+
+.st-chips__nav--start {
+  left: -4px;
+}
+
+.st-chips__nav--end {
+  right: -4px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .st-chips--more-start .st-chips__nav--start,
+  .st-chips--more-end .st-chips__nav--end {
+    display: grid;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Raspodela                                                           */
+/* ------------------------------------------------------------------ */
+
+.st-seg {
+  background: var(--st-seg);
+}
+
+.st-seg[data-kind='none'] {
+  background: color-mix(in oklab, var(--faint) 45%, transparent);
+}
+
+.st-seg[data-kind='stale'] {
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in oklab, var(--faint) 75%, transparent) 0 2px,
+    color-mix(in oklab, var(--faint) 25%, transparent) 2px 4px
+  );
+}
+
+/* Neaktivne (SEPA ih je ugasila): samo obris, bez ispune – nisu deo mreže. */
+.st-seg[data-kind='inactive'] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--faint) 70%, transparent);
+}
+
+/* ------------------------------------------------------------------ */
+/* Animacije                                                         */
+/* ------------------------------------------------------------------ */
+
+@keyframes st-bar-grow {
+  from {
+    transform: scaleX(0.12);
+  }
+}
+
+@keyframes st-rise {
+  from {
+    opacity: 0.4;
+    transform: translateY(6px);
+  }
+}
