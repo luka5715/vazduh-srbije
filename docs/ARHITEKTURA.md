@@ -445,9 +445,14 @@ Konstante su `WRITE_CONCURRENCY` (sync.ts), `concurrency` (kosavaClient.ts), `PA
   `signIn()` zove `ensureSignedInWithFabric` i **mora** da krene iz klika (popup).
 - `createDataService()` vraća `RayfinDataService(getRayfinClient())` ili `DemoDataService` (samo kad je
   `VITE_SERVICE_MODE=demo`; u `rayfin` build-u demo kod i podaci ne postoje). Pravila Rayfin klijenta koja
-  `RayfinDataService` poštuje: `.select([...])` sa eksplicitnim poljima, `.where({ station_id: { eq } ,
-  day: { gte } })` po stranom ključu (ne `station.id`), `.orderBy({ polje: 'asc' | 'desc' })` malim
-  slovima, `.first(n)` uvek, `.executePaginated()` za liste koje mogu preći stranu.
+  `RayfinDataService` poštuje: `.select([...])` sa eksplicitnim poljima, `.where({ station_id: { eq } })`
+  po stranom ključu (ne `station.id`), `.orderBy({ polje: 'asc' | 'desc' })` malim slovima, `.first(n)`
+  uvek, `.executePaginated()` za liste koje mogu preći stranu. Nad tekstualnim poljima Fabric GraphQL
+  (Data API Builder) prima samo `eq`/`neq`/`contains`/…: `gte` na `day` backend odbija (potvrđeno u
+  Fabric-u 8. 10. 2026, „The specified input object field `gte` does not exist“), pa se opseg dana
+  dobija sortiranjem `day desc` i prekidom čitanja čim strana padne ispod traženog dana. Iz istog
+  razloga funkcije proveravaju postojanje redova samo `eq` upitima (sve stanice i snimci odjednom,
+  `DailyStat` po danu), bez filtera `in`.
 - Entiteti iz `rayfin/data` se u frontend uvoze **samo kao tipovi** (`import type`):
   `@vitejs/plugin-react-swc` ne parsira TC39 dekoratore, pa ESLint pravilo `no-restricted-imports` u
   `eslint.config.js` zabranjuje vrednosne uvoze iz `src/**`.

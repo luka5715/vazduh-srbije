@@ -21,8 +21,8 @@
  *
  * Trošak upisa: SDK-ov `upsert` je `findById` + `create`/`update`, tj. 2 zahteva po
  * redu (uz nekadašnji zaseban `Station.update` za `lastObservationAt` i 3). Ovde se
- * postojanje redova proverava jednim upitom po paketu od ≤100 id-ova
- * (`where({ id: { in } })`), pa sledi tačno jedna mutacija po redu, a
+ * postojanje redova čita unapred (sve stanice i snimci jednim upitom, DailyStat jednim
+ * upitom po danu, samo filter `eq`), pa sledi tačno jedna mutacija po redu, a
  * `lastObservationAt` ulazi u isti upis stanice. Za 36 h i ~60 stanica × 5 polutanata:
  * ~10 upita + ~60 + ~60 + ~600–900 mutacija ≈ 750–1050 zahteva (ranije ~2.100).
  */
@@ -48,8 +48,8 @@ const MIN_HOURS_BACK = 3;
 const MAX_HOURS_BACK = 168;
 /** Kosava API čuva 30 dana unazad. */
 const RETENTION_DAYS = 30;
-/** Najviše id-ova u jednom `in` filteru: jedna strana GraphQL API-ja je 100 redova. */
-const LOOKUP_CHUNK = 100;
+/** Strana za čitanje postojećih DailyStat redova jednog dana (~5 polutanata × broj stanica). */
+const DAY_PAGE = 5000;
 /** Gornja granica za jednostrani upit nad stanicama (mreža ima ~60 stanica). */
 const STATION_PAGE = 1000;
 /** `SyncRun.message` je `@text({ max: 1000 })`; ostavljamo rezervu za višebajtne znakove. */
@@ -127,22 +127,15 @@ async function finishRun(
   }
 }
 
-/** Upit koji za zadate id-ove vraća postojeće redove (`select(['id', …]).where({ id: { in } })`). */
-type IdLookup<R extends { id: string }> = (ids: string[]) => Promise<R[]>;
-
-/** Redovi koji već postoje u bazi: jedan upit po paketu od `LOOKUP_CHUNK` id-ova. */
-async function existingRows<R extends { id: string }>(ids: readonly string[], lookup: IdLookup<R>): Promise<Map<string, R>> {
-  const chunks: string[][] = [];
-  for (let i = 0; i < ids.length; i += LOOKUP_CHUNK) chunks.push(ids.slice(i, i + LOOKUP_CHUNK));
-  const found = new Map<string, R>();
-  await mapLimit(chunks, WRITE_CONCURRENCY, async (chunk) => {
-    for (const row of await lookup(chunk)) found.set(row.id, row);
-  });
-  return found;
-}
+/**
+ * Čita redove koji već postoje u bazi za zadate redove za upis. Namerno koristi samo filtere
+ * `eq` i neograničen `first(n)`: Fabric GraphQL (Data API Builder) nad tekstualnim poljima ne
+ * podržava `gte`/`lte`, a `in` nije proveren – oba bi srušila sinhronizaciju.
+ */
+type ExistingLookup<F, R extends { id: string }> = (rows: ReadonlyArray<{ id: string; fields: F }>) => Promise<R[]>;
 
 interface RowWriter<F, R extends { id: string } = { id: string }> {
-  lookup: IdLookup<R>;
+  lookup: ExistingLookup<F, R>;
   create(id: string, fields: F): Promise<unknown>;
   update(id: string, fields: F): Promise<unknown>;
   /** Postojeći red je bolji od novog – ne prepisuje se (npr. dan sa više sati merenja). */
@@ -150,7 +143,7 @@ interface RowWriter<F, R extends { id: string } = { id: string }> {
 }
 
 /**
- * Upisuje redove sa determinističkim id-om: jedna provera postojanja po paketu, zatim
+ * Upisuje redove sa determinističkim id-om: jedna provera postojanja po entitetu, zatim
  * `create` za nove i `update` za postojeće (umesto SDK-ovog `upsert`-a sa 2 zahteva po redu).
  * Ako `create` padne — tipično duplikat id-a jer je paralelna sinhronizacija u međuvremenu
  * upisala isti red — pokušava se `update`; ako i on padne, prijavljuje se prvobitna greška.
@@ -162,9 +155,9 @@ async function writeRows<F, R extends { id: string }>(
   if (rows.length === 0) return 0;
   let existing: Map<string, R>;
   try {
-    existing = await existingRows(rows.map((row) => row.id), writer.lookup);
+    existing = new Map((await writer.lookup(rows)).map((row) => [row.id, row] as const));
   } catch (error) {
-    // Ako provera postojanja padne (npr. backend ne podrži filter `in`), svaki red ide kroz
+    // Ako provera postojanja padne (npr. backend odbije filter), svaki red ide kroz
     // create → update, što košta koliko i SDK-ov upsert, ali sinhronizacija ne staje.
     log(`Provera postojanja nije uspela, prelazim na create/update po redu: ${errorText(error)}`);
     existing = new Map();
@@ -243,7 +236,7 @@ async function upsertStations(
     };
   });
   return writeRows(rows, {
-    lookup: (ids) => data.Station.select(['id']).where({ id: { in: ids } }).first(ids.length).execute(),
+    lookup: () => data.Station.select(['id']).first(STATION_PAGE).execute(),
     create: (id, fields) => data.Station.create({ id, ...fields }),
     update: (id, fields) => data.Station.update({ id }, fields),
   });
@@ -285,7 +278,7 @@ async function upsertSnapshots(
     },
   }));
   return writeRows(rows, {
-    lookup: (ids) => data.StationSnapshot.select(['id']).where({ id: { in: ids } }).first(ids.length).execute(),
+    lookup: () => data.StationSnapshot.select(['id']).first(STATION_PAGE).execute(),
     create: (id, fields) => data.StationSnapshot.create({ id, ...fields }),
     update: (id, fields) => data.StationSnapshot.update({ id }, fields),
   });
@@ -319,7 +312,15 @@ async function upsertDailyStats(
     },
   }));
   return writeRows(rows, {
-    lookup: (ids) => data.DailyStat.select(['id', 'hours']).where({ id: { in: ids } }).first(ids.length).execute(),
+    // Jedan upit po danu (`day eq`): dani iz prozora, rastuće, da redosled bude determinističan.
+    lookup: async (pending) => {
+      const days = [...new Set(pending.map((row) => row.fields.day))].sort();
+      const found: Array<{ id: string; hours: number }> = [];
+      for (const day of days) {
+        found.push(...(await data.DailyStat.select(['id', 'hours']).where({ day: { eq: day } }).first(DAY_PAGE).execute()));
+      }
+      return found;
+    },
     create: (id, fields) => data.DailyStat.create({ id, ...fields }),
     update: (id, fields) => data.DailyStat.update({ id }, fields),
     keep: (existing, fields) => fields.day < today && Number(existing.hours) > fields.hours,

@@ -477,6 +477,7 @@ idempotentan: ponovljena sinhronizacija prepisuje iste redove, ništa se ne dupl
 | `Dialect is required when Data module is enabled` (HTTP 400) | `services.data.dialect` mora da postoji; u ovom projektu je već `mssql`. |
 | `npx rayfin up staticapp deploy` kaže da nema udaljenog endpointa | Statički deploy samo ažurira postojeću stavku. Prvo pokrenite pun `npx rayfin up`. |
 | Statički deploy prelazi **100 MB** | Komprimovana arhiva ne sme biti veća od 100 MB; izbacite source map-ove i velike fajlove (ovaj `dist/` je reda nekoliko stotina KB). |
+| `GraphQL errors: The specified input object field \`gte\` does not exist` (stranica Sinhronizacija ili Trendovi) | Stara verzija aplikacije je filtrirala dan sa `gte`, što Fabric GraphQL ne podržava nad tekstom. Povucite najnoviji kod i ponovite `npx rayfin up`. |
 | Posle izmene entiteta upiti ne vide novo polje | Šema se možda još primenjuje: `npx rayfin up status`, zatim `npx rayfin up db apply`; osvežite frontend. |
 | Build pada: `Missing required Rayfin client environment variable: VITE_RAYFIN_PUBLISHABLE_KEY` | `.env.local` nije generisan iz `rayfin/.env`: prvo `npx rayfin up`, pa `npx rayfin env --framework vite`. Demo build (`build:demo`) ne traži ključ. |
 | Prijava se ne otvara (popup blokiran) | Fabric SSO popup mora da krene iz klika korisnika – pritisnite dugme za prijavu; iz Fabric portala (iframe) sesija se preuzima automatski. |

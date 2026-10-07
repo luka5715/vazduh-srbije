@@ -4,6 +4,7 @@
  *  - `.execute()` vraća JEDNU stranu (podrazumevano 100 redova) → uvek `.first(n)`;
  *  - sve što može da pređe stranu ide kroz `.executePaginated()` + `.after(endCursor)`;
  *  - filtriranje po stranom ključu (`station_id`), ne po `station.id`;
+ *  - nad tekstualnim poljima samo `eq`-filteri (opseg dana: sortiranje + rano zaustavljanje);
  *  - smer sortiranja malim slovima.
  */
 
@@ -96,20 +97,40 @@ interface Page<T> {
   endCursor?: string;
 }
 
-/** Petlja kroz sve strane: isti select/where/orderBy, menja se samo `after`. */
-async function fetchAllPages<T>(runPage: (cursor: string | undefined) => Promise<Page<T>>): Promise<T[]> {
+/**
+ * Petlja kroz strane: isti select/where/orderBy, menja se samo `after`. `stopAfter` (nad
+ * stranom) prekida dalje čitanje – za upite sortirane opadajuće po danu, čim strana pređe
+ * ispod traženog dana. Fabric GraphQL (Data API Builder) nad tekstualnim poljima prima samo
+ * `eq`/`neq`/`contains`/…; `gte` na `day` backend odbija („input object field gte does not
+ * exist“), pa se opseg dana dobija sortiranjem i ranim zaustavljanjem umesto filterom.
+ */
+async function fetchAllPages<T>(
+  runPage: (cursor: string | undefined) => Promise<Page<T>>,
+  stopAfter?: (page: T[]) => boolean,
+): Promise<T[]> {
   const all: T[] = [];
   let cursor: string | undefined;
   let pages = 0;
   do {
     const page = await runPage(cursor);
     all.push(...page.items);
+    if (stopAfter?.(page.items)) break;
     const next = page.hasNextPage ? page.endCursor : undefined;
     // Napreduje samo kad postoji sledeća strana I nov kursor; inače staje.
     cursor = next && next !== cursor ? next : undefined;
     pages++;
   } while (cursor && pages < MAX_PAGES);
   return all;
+}
+
+/** Strana sortirana po `day desc` je „gotova“ čim njen poslednji red padne ispod `fromDay`. */
+function pastFromDay(fromDay: string) {
+  return (page: DailyStat[]) => page.length > 0 && page[page.length - 1].day < fromDay;
+}
+
+/** Zadržava dane od `fromDay` (uključivo) i vraća ih rastuće, kako pozivaoci očekuju. */
+function fromDayAscending(rows: DailyStat[], fromDay: string): DailyStat[] {
+  return rows.filter((row) => row.day >= fromDay).sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
 }
 
 function toStationRecord(row: Station): StationRecord {
@@ -196,25 +217,24 @@ export class RayfinDataService implements DataService {
   async listDailyStats(stationId: string, fromDay: string): Promise<DailyStatRecord[]> {
     const rows = await fetchAllPages<DailyStat>((cursor) => {
       let query = this.client.data.DailyStat.select(DAILY_FIELDS)
-        .where({ station_id: { eq: stationId }, day: { gte: fromDay } })
-        .orderBy({ day: 'asc' })
+        .where({ station_id: { eq: stationId } })
+        .orderBy({ day: 'desc' })
         .first(PAGE_SIZE);
       if (cursor) query = query.after(cursor);
       return query.executePaginated();
-    });
-    return rows.map(toDailyStatRecord);
+    }, pastFromDay(fromDay));
+    return fromDayAscending(rows, fromDay).map(toDailyStatRecord);
   }
 
   async listNetworkDailyStats(fromDay: string): Promise<DailyStatRecord[]> {
     const rows = await fetchAllPages<DailyStat>((cursor) => {
       let query = this.client.data.DailyStat.select(DAILY_FIELDS)
-        .where({ day: { gte: fromDay } })
-        .orderBy({ day: 'asc' })
+        .orderBy({ day: 'desc' })
         .first(PAGE_SIZE);
       if (cursor) query = query.after(cursor);
       return query.executePaginated();
-    });
-    return rows.map(toDailyStatRecord);
+    }, pastFromDay(fromDay));
+    return fromDayAscending(rows, fromDay).map(toDailyStatRecord);
   }
 
   async listSyncRuns(limit: number): Promise<SyncRunRecord[]> {

@@ -121,20 +121,24 @@ describe('runSync', () => {
     expect(data.DailyStat.rows.size).toBe(16);
     expect(data.SyncRun.rows.size).toBe(1);
 
-    // Database traffic: the in-progress check, one batched existence lookup per entity (+ the
-    // active-station scan), then exactly one mutation per row — no per-row findById, no upsert,
-    // and lastObservationAt rides along in the Station row instead of a separate update.
+    // Database traffic: the in-progress check, one existence read per entity (all stations, the
+    // active-station scan, all snapshots, one DailyStat page per touched day – only `eq` filters,
+    // because Fabric GraphQL rejects `gte`/`in` on text columns), then exactly one mutation per row —
+    // no per-row findById, no upsert, and lastObservationAt rides along in the Station row.
     expect(data.reads.map((r) => `${r.entity}:${r.op}`)).toEqual([
       'SyncRun:query',
       'Station:query',
       'Station:query',
       'StationSnapshot:query',
       'DailyStat:query',
+      'DailyStat:query',
     ]);
     expect(data.reads[0]).toMatchObject({ where: { kind: { eq: 'sync' }, status: { eq: 'running' } } });
-    expect(data.reads[1]).toMatchObject({ limit: 4, where: { id: { in: expect.arrayContaining([stationId(38)]) } } });
+    expect(data.reads[1]).toMatchObject({ limit: 1000 });
+    expect(data.reads[1].where).toBeUndefined();
     expect(data.reads[2].where).toEqual({ active: { eq: true } });
-    expect(data.reads[4].limit).toBe(16);
+    expect(data.reads.slice(4).map((r) => r.where?.day?.eq)).toEqual(['2026-10-05', '2026-10-06']);
+    expect(data.reads[4].limit).toBe(5000);
     expect(data.countCalls('Station', 'create')).toBe(4);
     expect(data.countCalls('Station', 'update')).toBe(0);
     expect(data.countCalls('StationSnapshot', 'create')).toBe(4);
@@ -213,11 +217,11 @@ describe('runSync', () => {
     expect(data.DailyStat.rows.size).toBe(16);
     expect(data.SyncRun.rows.size).toBe(2);
     // Every data row already exists, so the second run is 24 updates after the in-progress
-    // check and 4 batched lookups.
+    // check and the existence reads (stations, active scan, snapshots, two DailyStat days).
     const secondRunWrites = data.calls.slice(before).filter((c) => c.entity !== 'SyncRun');
     expect(secondRunWrites).toHaveLength(24);
     expect(secondRunWrites.every((c) => c.op === 'update')).toBe(true);
-    expect(data.reads.slice(readsBefore)).toHaveLength(5);
+    expect(data.reads.slice(readsBefore)).toHaveLength(6);
     expect(data.reads.slice(readsBefore).every((r) => r.op === 'query')).toBe(true);
   });
 
@@ -327,7 +331,7 @@ describe('runSync', () => {
     expect(data.Station.rows.size).toBe(4);
   });
 
-  it('batches existence lookups in chunks of 100 ids', async () => {
+  it('reads existing daily rows with one eq-filtered query per touched day', async () => {
     // 13 synthetic stations × PM10 × 8 local days (168 h window from 2026-09-29) = 104 DailyStat rows.
     const stations = Array.from({ length: 13 }, (_, i) => ({
       station_id: 1000 + i,
@@ -356,8 +360,10 @@ describe('runSync', () => {
     expect(result.dailyStatsWritten).toBe(13 * 8);
     expect(data.DailyStat.rows.size).toBe(104);
     const lookups = data.reads.filter((r) => r.entity === 'DailyStat');
-    expect(lookups.map((r) => (r.where?.id?.in ?? []).length).sort((a, b) => b - a)).toEqual([100, 4]);
-    expect(lookups.map((r) => r.limit).sort((a, b) => (b ?? 0) - (a ?? 0))).toEqual([100, 4]);
+    // One `day eq` read per touched day, ascending; no `in` filter (unsupported by Fabric GraphQL).
+    const days = lookups.map((r) => r.where?.day?.eq);
+    expect(days).toEqual(['2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05', '2026-10-06']);
+    expect(lookups.every((r) => r.limit === 5000 && r.where?.id === undefined)).toBe(true);
     expect(data.countCalls('DailyStat', 'create')).toBe(104);
 
     const before = data.calls.length;
