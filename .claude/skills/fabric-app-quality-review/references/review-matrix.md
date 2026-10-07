@@ -5,7 +5,7 @@ Select the rows relevant to the artifact and change. Use Pass / Fail / Untested 
 | Area | Check | Evidence |
 | --- | --- | --- |
 | Product | Main audience and decision are clear | Page contract and visible landing page |
-| Visual brief | Requested visual ambition is met separately from technical correctness | Rendered composition, design contract and latest user feedback |
+| Visual brief | Requested visual ambition is met separately from technical correctness | Filled design contract or inferred criteria; verdict Meets brief / Needs revision / Untested, not Pass/Fail |
 | Host | App-level and report-level navigation cooperate | Render inside intended app |
 | Model | All fields/measures exist and use intended grain | Model metadata and query results |
 | Metrics | Units, denominator, period, target, favorable direction and totals agree | Definitions plus filtered examples |

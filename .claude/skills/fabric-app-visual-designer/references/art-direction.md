@@ -8,9 +8,11 @@ For premium work, use two or three relevant reference views when available: one 
 
 Use the design-contract template. Record what will be visually distinctive and what will be removed. Adjectives such as clean, modern and premium are insufficient without a corresponding layout, typography or component decision.
 
+When the user's references or an approved design use a pattern this skill discourages by default (equal card grids, ring gauges, glass, gradient or ambient surfaces), the reference wins for that brief provided the data stays readable and comparable; keep such treatments off text, legends and quantitative marks, and record the adopted pattern and the readability check in the design contract.
+
 ## Explore composition before detail
 
-For a new premium experience or a rejected generic design, render two small concept studies at the same viewport, with the same labels and dataset. Vary at least two structural choices: where the primary message sits, how comparison is presented, the relationship between analysis and actions, or how content is grouped. Light/dark variants of one layout do not count.
+For a new premium experience or a rejected generic design, make two concept studies with the real labels and one shared sample dataset at the two target viewports (e.g. 390×844 and 1280×900): static mockups or wireframes without data binding, chart libraries or animation; for a Power BI target, two layout specifications or two Desktop pages on the same canvas. Vary at least two structural choices: where the primary message sits, how comparison is presented, the relationship between analysis and actions, or how content is grouped. Light/dark variants of one layout do not count. Judge them against the contract's acceptance rows and record the chosen study, the loser and the reason in the design contract.
 
 Possible starting compositions include:
 
@@ -24,11 +26,11 @@ Adapt these to the business question. They are not new presets to repeat univers
 
 ## Give the design an identity
 
-- Establish a display, section, body and metadata type hierarchy. For web mockups, start around 32–44 px for a page title, 13–15 px for body, and 12–14 px for labels, then inspect at actual rendered size. Reserve 11 px for genuinely secondary metadata. Choose large metric sizes in proportion to their importance. Map separately to native host units and verify Fit to page.
+- Establish a display, section, body and metadata type hierarchy. For web mockups, start around 32–44 px for a page title, 13–15 px for body, and 12–14 px for labels, then inspect at actual rendered size. Reserve 11 px for genuinely secondary metadata. Choose large metric sizes in proportion to their importance. For a Power BI target, map to point sizes and verify after Fit to page; for a Fabric Apps/Rayfin frontend, verify at the real rendered size inside the Fabric portal iframe and on the standalone App URL, at the phone width the user actually uses; when only a local build is available, verify at the same widths locally and mark the portal and App URL renders Untested.
 - Define open space and grouping before card styling. Use surface changes where they express structure; avoid repeating the same radius, outline and padding around every block.
 - Choose one distinctive component treatment tied to the task: an integrated comparison, a carefully aligned diagnostic table, or a useful entity inspector. Do not substitute decorative orbs, glass effects and gradients for information hierarchy.
 - Use consistent typography, units, label placement, icon family and chart semantics across landing, detail and mobile. An imported font is optional; confirm it loads or make the fallback equally intentional.
-- Reorder mobile content around the first decision. Move secondary composition/rankings to an appropriate detail route or collapse them deliberately. A desktop page stacked into five screens of cards is not a mobile design. Preserve essential controls and context.
+- Reorder mobile content around the first decision. Move secondary composition/rankings to an appropriate detail route or collapse them deliberately. A desktop page stacked into five screens of cards with nothing deferred is not a mobile design. Preserve essential controls and context. Defer by collapsing secondary analytical sections behind a visible control or moving them to a page the navigation already offers; never defer the first decision or the main action.
 
 ## Craft each chart for a question
 

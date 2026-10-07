@@ -1,6 +1,7 @@
 # Application review
 
-- Result for verified scope:
+- Result for verified scope (ready / needs revision / blocked by named Blocker findings):
+- Visual fitness for the brief (Meets brief / Needs revision / Untested, artifact inspected):
 - Artifact/version:
 - Host and verification surfaces:
 - Changed scope:

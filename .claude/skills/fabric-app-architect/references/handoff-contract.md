@@ -9,7 +9,7 @@ Use these tables as working structures; fill only the relevant fields. Keep conf
 - Deliverable type: concept, Desktop instructions, theme, PBIR changes, or deployed app.
 - Primary visual direction, brand requirements, language and locale.
 - Visual ambition, reference evidence, concept studies compared and latest explicit user feedback.
-- Visual acceptance criteria and intentionally deferred mobile content; distinguish these from technical completion.
+- Visual acceptance criteria (the quality review records each as Meets brief / Needs revision / Untested, never Pass/Fail) and intentionally deferred mobile content; distinguish these from technical completion. References the user supplied or a design they approved take precedence over default patterns; record them as the direction to keep.
 
 ## Page contract
 
@@ -35,4 +35,4 @@ For every metric include an actual model binding if known, definition, unit, agg
 
 ## Implementation status
 
-State which deliverables exist, what was tested in the target host, and what remains unverified. A layout specification and a theme are useful deliverables even without tenant access, but must be identified accurately.
+State which deliverables exist, what was tested in the target host, and what remains unverified. Report the functional result (ready for the verified scope, needs revision, or blocked) separately from the visual verdict (meets brief, needs revision, or untested). A layout specification and a theme are useful deliverables even without tenant access, but must be identified accurately.

@@ -4,7 +4,7 @@ Select cases that exercise the changed behavior. Record before/after context and
 
 | Change | Cases | Expected evidence |
 | --- | --- | --- |
-| Palette/type/layout | Light/dark if provided; long title; negative/large value; Fit to page | Contrast calculation and actual render; no clipped primary content |
+| Palette/type/layout | Light/dark if provided; long title; negative/large value; Fit to page (Power BI) or the real rendered size at the target viewports (web frontend) | Contrast calculation and actual render; no clipped primary content |
 | Filter panel/bookmark | Single selection → open/close → multi-selection → reset | Data preserved by visibility controls; reset matches stated scope |
 | Measure/comparison | Representative detail, total, multi-select, partial period, blank/zero | Expected calculation tied to business definition |
 | Navigation/drillthrough | Valid entity, no selection, return, relevant filter context | Supported route and intelligible disabled/missing-context state |

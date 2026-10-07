@@ -20,4 +20,4 @@ Tokens use `artifactType: fabric-design-tokens`, `specVersion: 1.0` and `#RRGGBB
 
 ## Separate evidence still required
 
-Check actual font sizes, visual boundaries, focus/selected states, chart labels and keyboard order in the host. Validate native theme/PBIR files against Microsoft's target schemas. Check real measure bindings, totals, refresh metadata, filtering and consumer access. `Pass for static scope` must not be shortened to “the app passed QA.”
+Check actual font sizes, visual boundaries, focus/selected states, chart labels and keyboard order in the host. Validate native theme/PBIR files against Microsoft's target schemas. Check real measure bindings, totals, refresh metadata, filtering and consumer access. Judge visual fitness for the brief through [visual-quality-gate.md](visual-quality-gate.md); the report lists it, with schema, host rendering, model/permissions and full accessibility/performance, as an Untested row every run. `Pass for static scope` must not be shortened to “the app passed QA.”

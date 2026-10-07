@@ -1,8 +1,7 @@
 interface:
   display_name: Fabric App Visual Designer
-  short_description: Dizajn, teme i desktop/mobilni rasporedi
-  default_prompt: Koristi $fabric-app-visual-designer da napraviš moderan vizuelni
-    sistem i primenljive Power BI dizajn fajlove.
+  short_description: Art direction, dizajn sistem i desktop/mobilni rasporedi
+  default_prompt: Koristi $fabric-app-visual-designer da odrediš art direction, uporediš dva kompoziciono različita koncepta i isporučiš primenljiv vizuelni sistem (raspored, tipografija, grafikoni, tema i tokeni) za moju Fabric/Power BI aplikaciju.
   icon_small: assets/icon.svg
   icon_large: assets/icon.svg
 policy:

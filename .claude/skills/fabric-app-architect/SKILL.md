@@ -34,7 +34,7 @@ Reuse existing project conventions. Keep a short decision log containing the cho
 
 - Write one sentence defining who the app serves and which decision becomes easier.
 - Establish a distinct visual direction appropriate to the domain: executive calm, operational clarity, or analytical density. Carry brand assets through without copying another product's identity.
-- For a new premium app or a rejected generic design, have the visual designer compare structurally different concept studies and select a direction before propagating a page shell. Preserve the latest user feedback in the handoff. Do not constrain exploration to a repeated KPI-card grid, or equate more features and animation with a better composition.
+- For a new premium app or a rejected generic design, have the visual designer compare structurally different concept studies and select a direction before propagating a page shell. Preserve the latest user feedback in the handoff. Do not constrain exploration to a repeated KPI-card grid, or equate more features and animation with a better composition. When the user supplies references or has approved a design, that direction wins over the companions' default anti-patterns as long as the data stays readable; record it in the handoff as the direction to keep.
 - Plan only pages that serve a decision. Prefer Overview → Analysis → Details; add an action page only for a concrete operational workflow.
 - Define the landing experience, app-level sections, report-level pages, and drillthrough hierarchy. Avoid two competing full-size navigation rails when the host already provides one.
 - Create a page contract table: page, audience, question, primary KPI, supporting visuals, filters, next action, and source dependencies.

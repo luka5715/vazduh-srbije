@@ -2,7 +2,7 @@
 
 ## Before and after evidence
 
-Record viewport, report/page, date context and selections for comparable screenshots. Render changes using available supported tools. Identify the render surface; an HTML concept is not a Power BI rendering. Inspect both full-page balance and individual visuals with long labels or high density.
+Record viewport, report/page, date context and selections for comparable screenshots. Render changes using available supported tools. Identify the render surface; an HTML concept is not a Power BI rendering. Inspect both full-page balance and individual visuals with long labels or high density. For a Fabric Apps/Rayfin frontend, render with the project's own screenshot or e2e tooling at the phone, desktop and laptop-fold viewports; emulate prefers-color-scheme, prefers-reduced-motion and forced-colors; freeze the clock or seed the data so before/after renders share the same state; measure text sizes instead of estimating. Mark Untested what needs the deployed item: the portal iframe (no addressable URL, SSO handoff) versus the standalone App URL.
 
 ## Interaction scenarios
 
@@ -14,6 +14,19 @@ Record viewport, report/page, date context and selections for comparable screens
 - Drillthrough and return; check preserved context.
 - Use no-data, missing-target and undefined-denominator conditions when data permits.
 - Repeat affected actions on mobile when in scope.
+
+## Web frontend (Fabric Apps/Rayfin) scenarios
+
+- Open the standalone App URL and the app inside the portal iframe.
+- Resume a backgrounded phone tab after the data has aged (advance the frozen clock past the app's reload threshold, then dispatch visibilitychange hidden → visible).
+- Open a deep link with invalid parameters.
+- Browser Back after a detail view.
+- prefers-reduced-motion on.
+- forced-colors/high-contrast.
+- 390 px width with no horizontal overflow.
+- Expired session on a data read (401/403).
+
+Mark portal-only cases, and the expired-session case when no backend is reachable, Untested when only a local build is available; cite the code path as static evidence.
 
 ## Static-file checks
 

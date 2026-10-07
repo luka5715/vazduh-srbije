@@ -1,6 +1,6 @@
 # Design system and component contracts
 
-The values below are design starting points, not product constraints. Keep them coherent and adjust to actual canvas and client scale.
+The values below are design starting points, not product constraints. Keep them coherent and adjust to actual canvas and client scale. The brand token is a neutral placeholder; replace it from the contract before generating assets.
 
 ## Tokens
 
@@ -16,7 +16,7 @@ The values below are design starting points, not product constraints. Keep them 
 | Warning | #92400E | #FBBF24 | Attention, with a label |
 | Negative | #B91C1C | #F87171 | Unfavorable outcomes, with a label |
 
-Use a host-supported type family and deliberate fallback. Set display, section, body and metadata roles from the design contract, not from a fixed theme alone. Reserve the smallest size for secondary metadata; avoid using it for all links, chart labels and statuses. Verify text after actual client or Fit to page scaling. Use a coherent spacing rhythm; determine corner radii, open sections and surfaces from the selected direction rather than surrounding every group with a rounded border.
+Use a host-supported type family and deliberate fallback. Set display, section, body and metadata roles from the design contract; when it is silent, start from metadata 11–12, labels and body 12–14, section titles 16–20, page title 24–32, primary metric 32–44 in the host's authoring units (points in Power BI; for a web frontend see art-direction.md). Reserve the smallest size for secondary metadata, not for links, statuses or chart labels. Verify after actual client or Fit to page scaling. Treat the generator's text classes and 10-unit radius as placeholders. Use a coherent spacing rhythm; derive radii, open sections and surfaces from the selected direction rather than surrounding every group with a rounded border.
 
 ## Components
 
@@ -40,11 +40,11 @@ The following 1440×900, 32-margin example is useful for a conventional report o
 - Header: x32 y32 w1376 h64.
 - Filters: x32 y120 w1376 h48.
 - Optional four KPI regions: y192 h128; widths 326, x32/382/732/1082.
-- Main trend: x32 y344 w876 h292.
-- Ranked drivers: x932 y344 w476 h292.
-- Exceptions/detail: x32 y660 w1376 h208.
+- Main trend: x32 y344 w865 h300.
+- Ranked drivers: x921 y344 w487 h300.
+- Exceptions/detail: x32 y668 w1376 h200.
 
-Each region includes its internal title/labels. Reclaim the KPI row when values belong inside the main analytical surface. This is a coarse layout specification, not a report definition or an approved premium design. The generator calculates scaffold geometry; the chosen art direction governs the finished page. Recalculate and validate bounds after changing the arrangement.
+Each region includes its internal title/labels. Reclaim the KPI row when values belong inside the main analytical surface. This is a coarse layout specification, not a report definition or an approved premium design. The rectangles above are the generator's `executive` output with four KPI containers at 1440×900; the generated desktop-layout.json is authoritative for its variant; the chosen art direction governs the finished page. Recalculate and validate bounds after changing the arrangement.
 
 ## Preset hierarchy
 

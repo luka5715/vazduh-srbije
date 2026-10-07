@@ -21,6 +21,6 @@ Use native visual titles when they remain readable and accessible; if a separate
 
 ## Visual craft checks
 
-Inspect long Serbian/localized labels, negative amounts, large values, multiline headers and selected slicer text. Specify rounding and localized separators without changing the numeric value. Check Fit to page at the expected laptop size as well as the authoring canvas. Reserve tooltip detail for supplementary content; critical context must remain visible without hover.
+Inspect long Serbian/localized labels, negative amounts, large values, multiline headers and selected slicer text. Specify rounding and localized separators without changing the numeric value. Check Fit to page (Power BI) at the expected laptop size as well as the authoring canvas. Reserve tooltip detail for supplementary content; critical context must remain visible without hover.
 
 For a web frontend in Fabric Apps/Rayfin, translate the same hierarchy into its supported component system and responsive behavior. Do not transfer Power BI bookmark instructions into a custom frontend, or claim the frontend's CSS styles the Fabric portal.

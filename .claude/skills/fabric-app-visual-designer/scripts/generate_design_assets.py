@@ -106,7 +106,8 @@ def build(mode, brand=None, preset="executive", width=1440, height=900, kpis=0):
              "Series contrast is against the surface, not against every other series.",
              "Add labels/markers; palette checks do not establish color-vision accessibility.",
              "Border is decorative; use a contrast-qualified outline for an essential control.",
-             "Authoring text sizes need target-host verification at actual viewing scale."]
+             "Authoring text sizes need target-host verification at actual viewing scale.",
+             "cornerRadius, fontFamily and text classes are placeholders to be overridden from the design contract; they are not direction decisions."]
     if contrast(c["brand"], c["surface"]) < 3:
         notes.append("Brand fill needs an additional visible boundary when used as an essential control on the surface.")
     tokens = {

@@ -1,7 +1,10 @@
 # Fabric skillovi
 
 Tri skilla iz paketa „Fabric Skills Export“ (izdanje 7. oktobar 2026, dopuna „premium dizajn i
-animacije“ + „revizija nakon ponovljene vizuelne kritike“):
+animacije“ + „revizija nakon ponovljene vizuelne kritike“). Ovo je v3: paket v2 sa ispravkama posle
+pregleda – brief i reference korisnika imaju prednost nad podrazumevanim anti-obrascima, vizuelni verdikt
+(Meets brief / Needs revision / Untested) je odvojen od funkcionalnog, a QA ima merljive redove za
+tipografiju/mobilni prioritet i scenarije za Fabric Apps/Rayfin web frontend.
 
 | Skill | Namena |
 | --- | --- |
