@@ -3,20 +3,29 @@ import { describe, expect, it } from 'vitest';
 import type { CategoryRank, Parameter } from '@shared/aqi';
 import type { SnapshotValues, StationRecord, StationSnapshotRecord } from '@shared/contracts';
 
+import { buildDemoCore } from '@/demo/fixture';
 import { createProjection, SERBIA_BBOX } from '@/lib/geo';
+import { okrugOf } from '@/lib/insights';
 import { buildStationViews, type StationView } from '@/lib/stations';
 
-import { mapFrame, mapGeometry, unitsToKm } from './geometry';
+import { districtBounds, FOCUS_MIN_KM, FOCUS_PADDING, mapFrame, mapGeometry, unitsToKm } from './geometry';
 import {
   buildMarkers,
+  buildMarks,
+  CLUSTER_DISC_PX,
+  CLUSTER_MIN,
+  CLUSTER_SHIFT_KM,
+  clusterNote,
   MARKER_DOT_PX,
   MARKER_GAP_PX,
   markerCategoryLabel,
   markerSpacing,
+  markInFrame,
   MIN_MARKER_DISTANCE,
   neighborInDirection,
   spacingNote,
   summarizeMarkers,
+  type MapCluster,
 } from './markers';
 
 const NOW = new Date('2026-10-07T09:30:00Z');
@@ -322,5 +331,300 @@ describe('neaktivne stanice na mapi', () => {
     expect(off.label).toBe('Ugašena, neaktivna stanica (SEPA ju je ugasila)');
     expect(markerCategoryLabel(off)).toBe('Neaktivna');
     expect(markerCategoryLabel(markers.find((marker) => marker.id === 'a')!)).toBe('Prihvatljiv');
+  });
+});
+
+describe('uvećan okrug (districtBounds + mapFrame sa fokusom)', () => {
+  const geometry = mapGeometry();
+  const km = (units: number) => unitsToKm(geometry, units);
+
+  it('pravougaonik Grada Beograda je projekcija lon 19,97–20,84 / lat 44,24–45,08; nepoznat okrug → null', () => {
+    const bounds = districtBounds(geometry, 'Grad Beograd')!;
+    const [west, north] = geometry.projection.project(19.967, 45.08);
+    const [east, south] = geometry.projection.project(20.839, 44.243);
+    expect(bounds.x).toBeCloseTo(west, 0);
+    expect(bounds.y).toBeCloseTo(north, 0);
+    expect(bounds.x + bounds.w).toBeCloseTo(east, 0);
+    expect(bounds.y + bounds.h).toBeCloseTo(south, 0);
+    // ≈ 69 × 93 km – grad je viši nego širi.
+    expect(km(bounds.w)).toBeGreaterThan(60);
+    expect(km(bounds.w)).toBeLessThan(80);
+    expect(km(bounds.h)).toBeGreaterThan(85);
+    expect(km(bounds.h)).toBeLessThan(100);
+    expect(districtBounds(geometry, 'Nepostojeći okrug')).toBeNull();
+  });
+
+  it('fokusiran okvir: ivica 12 % oko okruga, odnos strana kontejnera, okrug u sredini i ceo unutra', () => {
+    const focus = districtBounds(geometry, 'Grad Beograd')!;
+    const frame = mapFrame(geometry, 343, 650, focus);
+    expect(frame.vb.w / frame.vb.h).toBeCloseTo(343 / 650, 5);
+    // Širina je vezujuća osa (kontejner je viši nego okrug): tačno okrug + 2 × 12 %.
+    expect(frame.vb.w).toBeCloseTo(focus.w * (1 + 2 * FOCUS_PADDING), 5);
+    expect(frame.vb.x + frame.vb.w / 2).toBeCloseTo(focus.x + focus.w / 2, 5);
+    expect(frame.vb.y + frame.vb.h / 2).toBeCloseTo(focus.y + focus.h / 2, 5);
+    expect(frame.vb.x).toBeLessThan(focus.x);
+    expect(frame.vb.y).toBeLessThan(focus.y);
+    expect(frame.vb.x + frame.vb.w).toBeGreaterThan(focus.x + focus.w);
+    expect(frame.vb.y + frame.vb.h).toBeGreaterThan(focus.y + focus.h);
+    // Uvećanje ≈ 4× u odnosu na celu zemlju (600 jedinica).
+    expect(geometry.projection.width / frame.vb.w).toBeCloseTo(4, 0);
+    // Širok kontejner: visina je vezujuća, širina se proširuje.
+    const wide = mapFrame(geometry, 700, 560, focus);
+    expect(wide.vb.h).toBeCloseTo(focus.h * (1 + 2 * FOCUS_PADDING), 5);
+    expect(wide.vb.w / wide.vb.h).toBeCloseTo(700 / 560, 5);
+    // Bez mere kontejnera: odnos strana zemlje.
+    expect(mapFrame(geometry, 0, 0, focus).vb.w / mapFrame(geometry, 0, 0, focus).vb.h).toBeCloseTo(geometry.aspect, 5);
+  });
+
+  it('mali okrug (Podunavski, ~35 km širok) dobija okvir od bar 60 km, da se vide susedi', () => {
+    const focus = districtBounds(geometry, 'Podunavski okrug')!;
+    expect(km(focus.w)).toBeLessThan(45);
+    const frame = mapFrame(geometry, 300, 300, focus);
+    expect(km(frame.vb.w)).toBeGreaterThanOrEqual(FOCUS_MIN_KM - 1e-6);
+    expect(km(frame.vb.h)).toBeGreaterThanOrEqual(FOCUS_MIN_KM - 1e-6);
+  });
+
+  it('uvećan okvir: mreža na pola stepena („44,5°“) i razmernik 20 km (≤ 35 % širine); cela mapa ostaje na 1° i 50 km', () => {
+    const frame = mapFrame(geometry, 343, 650, districtBounds(geometry, 'Grad Beograd'));
+    const labels = frame.graticule.map((line) => line.label);
+    expect(labels).toContain('44,5°');
+    expect(labels).toContain('45°');
+    expect(labels).toContain('20,5°');
+    expect(frame.graticule.filter((line) => line.axis === 'lon').map((line) => line.label)).toEqual(['20°', '20,5°']);
+    for (const line of frame.graticule) {
+      expect(line.pct).toBeGreaterThanOrEqual(0);
+      expect(line.pct).toBeLessThanOrEqual(100);
+    }
+    expect(frame.scaleBarKm).toBe(20);
+    expect(frame.scaleBarPct).toBeLessThanOrEqual(35);
+    expect(frame.scaleBarPct).toBeGreaterThan(20);
+    // 50 km bi bilo 58 % širine – ne staje; 20 km je prva koja staje.
+    expect(((50 / 20) * frame.scaleBarPct)).toBeGreaterThan(35);
+    const base = mapFrame(geometry, 343, 650);
+    expect(base.scaleBarKm).toBe(50);
+    expect(base.graticule.every((line) => !line.label.includes(','))).toBe(true);
+    expect(mapGeometry().graticule.every((line) => !line.label.includes(','))).toBe(true);
+    // Najmanji okvir (60 km) i dalje nosi 20 km (33 % širine); 10 i 5 km su rezerva za manje okvire.
+    const small = mapFrame(geometry, 300, 300, districtBounds(geometry, 'Podunavski okrug'));
+    expect(small.scaleBarKm).toBe(20);
+    expect(small.scaleBarPct).toBeLessThanOrEqual(35);
+    // Visina okruga (~60 km + ivica) je vezujuća, pa je okvir ~74 km širok: 20 km ≈ 27 %.
+    expect(small.scaleBarPct).toBeGreaterThan(20);
+  });
+
+  it('markInFrame: centar u okviru, uz umanjenje za ivicu', () => {
+    const vb = { x: 100, y: 100, w: 200, h: 100 };
+    expect(markInFrame({ x: 150, y: 150 }, vb)).toBe(true);
+    expect(markInFrame({ x: 99, y: 150 }, vb)).toBe(false);
+    expect(markInFrame({ x: 105, y: 150 }, vb, 10)).toBe(false);
+    expect(markInFrame({ x: 300, y: 200 }, vb)).toBe(true);
+    expect(markInFrame({ x: 300, y: 200 }, vb, 1)).toBe(false);
+  });
+});
+
+describe('grupe stanica (buildMarks) – 33 izmišljene beogradske stanice (`?demo=beograd`)', () => {
+  // Uveče (20:20 po Beogradu): nekoliko stanica je „Zagađen“, pa grupa ima oreol.
+  const EVENING = new Date('2026-10-07T18:20:00Z');
+  const core = buildDemoCore(EVENING, 'beograd');
+  const views = buildStationViews(core.stations, core.snapshots, EVENING);
+  const geometry = mapGeometry();
+  const { projection } = geometry;
+  const km = (units: number) => unitsToKm(geometry, units);
+  const belgrade = views.filter((view) => okrugOf(view) === 'Grad Beograd');
+  const clustersOf = (marks: ReturnType<typeof buildMarks>) => marks.filter((mark): mark is MapCluster => mark.type === 'cluster');
+  const focus = districtBounds(geometry, 'Grad Beograd')!;
+
+  it('fixture: 33 stanice Grada Beograda među 57', () => {
+    expect(views).toHaveLength(57);
+    expect(belgrade).toHaveLength(33);
+  });
+
+  it('cela mapa (343 px): bez grupisanja pomak do ~44 km; sa grupisanjem JEDNA grupa „Grad Beograd · 33“ u težištu, nijedna druga', () => {
+    const minDistance = markerSpacing(projection.width, 343, MARKER_DOT_PX.full);
+    const stage1 = summarizeMarkers(buildMarkers(views, projection, { lens: 'worst', minDistance }));
+    expect(km(stage1.maxShift)).toBeGreaterThan(30);
+    expect(km(stage1.maxShift)).toBeLessThan(50);
+
+    const marks = buildMarks(views, projection, { lens: 'worst', minDistance });
+    const clusters = clustersOf(marks);
+    expect(clusters).toHaveLength(1);
+    const [cluster] = clusters;
+    expect(cluster.id).toBe('cluster:Grad Beograd');
+    expect(cluster.okrug).toBe('Grad Beograd');
+    expect(cluster.count).toBe(33);
+    expect(cluster.members).toHaveLength(33);
+    expect(cluster.byRank.reduce((sum, count) => sum + count, 0) + cluster.unranked).toBe(33);
+    expect(cluster.byRank[3]).toBeGreaterThan(0);
+    expect(cluster.alert).toBe(true);
+    expect(cluster.dimmed).toBe(false);
+    expect(cluster.rank).toBe(cluster.byRank.indexOf(Math.max(...cluster.byRank)));
+    expect(cluster.label).toMatch(/^Grad Beograd · 33 stanice · (Prihvatljiv \d+, )?Umeren \d+, Zagađen \d+ — dodir otvara okrug$/);
+    // Težište pravih položaja (grupa nema suseda koji bi je pomerio).
+    const points = belgrade.map((view) => projection.project(view.position!.lon, view.position!.lat));
+    expect(cluster.x).toBeCloseTo(points.reduce((sum, [x]) => sum + x, 0) / points.length, 3);
+    expect(cluster.y).toBeCloseTo(points.reduce((sum, [, y]) => sum + y, 0) / points.length, 3);
+    expect(cluster.shift).toBeLessThan(0.01);
+    // 24 pojedinačne stanice + grupa; nijedna beogradska nije sama.
+    expect(marks).toHaveLength(views.length - 33 + 1);
+    expect(marks.some((mark) => mark.type === 'station' && okrugOf(mark.view) === 'Grad Beograd')).toBe(false);
+    // Preostale tačke su razmaknute i od grupe (disk 28 px prema tački 12 px).
+    const clusterRadius = (minDistance / 2) * (CLUSTER_DISC_PX.full / MARKER_DOT_PX.full);
+    for (const mark of marks) {
+      if (mark.type === 'cluster') continue;
+      expect(Math.hypot(mark.x - cluster.x, mark.y - cluster.y)).toBeGreaterThanOrEqual(clusterRadius + minDistance / 2 - 0.05);
+    }
+    // Legenda: članovi grupe se broje kao stanice (traka ostaje N/N), napomena imenuje okrug.
+    const summary = summarizeMarkers(marks);
+    expect(summary.clusters).toEqual([{ okrug: 'Grad Beograd', count: 33 }]);
+    expect(summary.clustered).toBe(33);
+    expect(summary.byRank.reduce((sum, count) => sum + count, 0)).toBe(views.filter((view) => view.position && !view.stale && view.category).length);
+    expect(summary.alert).toBeGreaterThanOrEqual(cluster.byRank[3]);
+    expect(summary.maxShift).toBeLessThan(stage1.maxShift);
+    expect(clusterNote(summary.clusters)).toBe('Gust okrug (Grad Beograd · 33) je prikazan kao grupa stanica; dodir otvara okrug.');
+    expect(clusterNote([])).toBeNull();
+    expect(clusterNote([{ okrug: 'Grad Beograd', count: 33 }, { okrug: 'Nišavski okrug', count: 5 }])).toBe(
+      'Gusti okruzi (Grad Beograd · 33, Nišavski okrug · 5) su prikazani kao grupe stanica; dodir otvara okrug.',
+    );
+  });
+
+  it('ista grupa na telefonu (326 px), na 2xl desktopu (420 px) i u kompaktnom pregledu (280 px, tačka 9 px)', () => {
+    for (const [widthPx, dotPx] of [[326, MARKER_DOT_PX.full], [420, MARKER_DOT_PX.full], [280, MARKER_DOT_PX.compact]] as const) {
+      const marks = buildMarks(views, projection, { lens: 'worst', minDistance: markerSpacing(projection.width, widthPx, dotPx) });
+      const clusters = clustersOf(marks);
+      expect(clusters).toHaveLength(1);
+      expect(clusters[0].count).toBe(33);
+    }
+  });
+
+  it('uvećan okrug (4×): nema grupe, 33 tačke sa pomakom ≤ 2 km; ostatak zemlje je van okvira, susedi u okviru prigušeni', () => {
+    for (const [widthPx, heightPx, dotPx] of [[343, 650, MARKER_DOT_PX.full], [326, 468, MARKER_DOT_PX.full], [280, 400, MARKER_DOT_PX.compact]] as const) {
+      const frame = mapFrame(geometry, widthPx, heightPx, focus);
+      const minDistance = markerSpacing(frame.vb.w, widthPx, dotPx);
+      expect(km(minDistance)).toBeLessThan(4);
+      const marks = buildMarks(views, projection, { lens: 'worst', minDistance, okrug: 'Grad Beograd' });
+      expect(clustersOf(marks)).toHaveLength(0);
+      const own = marks.filter((mark) => mark.type === 'station' && !mark.dimmed);
+      expect(own).toHaveLength(33);
+      expect(km(Math.max(...marks.map((mark) => mark.shift)))).toBeLessThanOrEqual(2);
+      const framed = marks.filter((mark) => markInFrame(mark, frame.vb));
+      expect(framed.filter((mark) => !mark.dimmed)).toHaveLength(33);
+      expect(framed.length).toBeLessThan(marks.length);
+      expect(framed.every((mark) => mark.type === 'station')).toBe(true);
+    }
+  });
+
+  it('izabrani okrug se ne grupiše ni na celoj mapi (grupa bi otvarala već otvoren okrug)', () => {
+    const marks = buildMarks(views, projection, { lens: 'worst', minDistance: markerSpacing(projection.width, 343), okrug: 'Grad Beograd' });
+    expect(clustersOf(marks)).toHaveLength(0);
+    expect(marks.filter((mark) => !mark.dimmed)).toHaveLength(33);
+  });
+
+  it('grupa drugog okruga je prigušena kad je izabran neki drugi (oznaka to kaže)', () => {
+    const marks = buildMarks(views, projection, { lens: 'worst', minDistance: markerSpacing(projection.width, 343), okrug: 'Nišavski okrug' });
+    const [cluster] = clustersOf(marks);
+    expect(cluster.count).toBe(33);
+    expect(cluster.dimmed).toBe(true);
+    expect(cluster.label).toContain('van izabranog okruga');
+    const summary = summarizeMarkers(marks);
+    expect(summary.dimmed).toBe(views.filter((view) => view.position).length - 1);
+    expect(summary.byRank).toEqual([0, 0, 0, 0, 0, 0].map((_, rank) => (rank === marks.find((mark) => !mark.dimmed)!.rank ? 1 : 0)));
+  });
+
+  it('izabrana stanica ostaje u grupi (broj ostaje 33), a grupa nosi izbor i to kaže u oznaci', () => {
+    const minDistance = markerSpacing(projection.width, 343);
+    const selectedId = belgrade[0].id;
+    const marks = buildMarks(views, projection, { lens: 'worst', minDistance, selectedId });
+    const [cluster] = clustersOf(marks);
+    expect(cluster.count).toBe(33);
+    expect(cluster.selected).toBe(true);
+    expect(cluster.members.some((member) => member.id === selectedId)).toBe(true);
+    expect(marks.some((mark) => mark.id === selectedId)).toBe(false);
+    expect(cluster.label).toMatch(/ · sadrži izabranu stanicu — dodir otvara okrug$/);
+    // Izbor van grupe: grupa nije izabrana.
+    const other = clustersOf(buildMarks(views, projection, { lens: 'worst', minDistance, selectedId: 'demo-station-9009' }))[0];
+    expect(other.selected).toBe(false);
+    expect(other.label).not.toContain('izabranu');
+  });
+
+  it('grupa učestvuje u navigaciji strelicama i u redosledu sever → jug kao i stanice', () => {
+    const marks = buildMarks(views, projection, { lens: 'worst', minDistance: markerSpacing(projection.width, 343) });
+    const [cluster] = clustersOf(marks);
+    const pancevo = marks.find((mark) => mark.type === 'station' && mark.view.station.name === 'Demo stanica Pančevo 1')!;
+    // Pančevo je severoistočno od Beograda: strelica „levo“ vodi do grupe.
+    expect(neighborInDirection(marks, pancevo.id, 'left')).toBe(cluster.id);
+    expect(neighborInDirection(marks, cluster.id, 'right')).toBe(pancevo.id);
+    for (let i = 1; i < marks.length; i++) expect(marks[i].yPct).toBeGreaterThanOrEqual(marks[i - 1].yPct);
+  });
+});
+
+describe('grupe stanica – pravilo praga', () => {
+  const geometry = mapGeometry();
+  const { projection } = geometry;
+  const serbia = markerSpacing(projection.width, 343);
+
+  it('okrug sa dve stanice na istoj tački se nikad ne grupiše (najmanje tri)', () => {
+    const two = make([
+      { id: 'a', name: 'Kraljevo A', municipality: 'Kraljevo', values: { PM10: at(10, 0) } },
+      { id: 'b', name: 'Kraljevo B', municipality: 'Kraljevo', values: { PM10: at(10, 0) } },
+    ]);
+    const marks = buildMarks(two, projection, { lens: 'worst', minDistance: serbia });
+    expect(marks.every((mark) => mark.type === 'station')).toBe(true);
+    expect(marks).toHaveLength(2);
+    expect(CLUSTER_MIN).toBe(3);
+  });
+
+  it('tri stanice u centru istog okruga (pomak > 5 km) su grupa sa tri člana, bez oreola kad nijedna nije Zagađen', () => {
+    const three = make(['A', 'B', 'C'].map((name) => ({ id: name, name: `Kraljevo ${name}`, municipality: 'Kraljevo', values: { PM10: at(10, 0) }, category: 0 })));
+    const marks = buildMarks(three, projection, { lens: 'worst', minDistance: serbia });
+    expect(marks).toHaveLength(1);
+    const [cluster] = marks;
+    expect(cluster.type).toBe('cluster');
+    if (cluster.type !== 'cluster') return;
+    expect(cluster.okrug).toBe('Raški okrug');
+    expect(cluster.count).toBe(3);
+    expect(cluster.byRank).toEqual([3, 0, 0, 0, 0, 0]);
+    expect(cluster.rank).toBe(0);
+    expect(cluster.alert).toBe(false);
+    expect(cluster.label).toBe('Raški okrug · 3 stanice · Dobar 3 — dodir otvara okrug');
+    expect(summarizeMarkers(marks).byRank).toEqual([3, 0, 0, 0, 0, 0]);
+  });
+
+  it('retka mreža (pet stanica okruga 30+ km udaljenih) ostaje pet tačaka – prag je pomak, ne broj', () => {
+    const sparse = make([
+      { id: 'n1', name: 'Niš', municipality: 'Niš', lat: 43.32, lon: 21.9, values: { PM10: at(10, 0) } },
+      { id: 'n2', name: 'Aleksinac', municipality: 'Niš', lat: 43.54, lon: 21.71, values: { PM10: at(10, 0) } },
+      { id: 'n3', name: 'Svrljig', municipality: 'Niš', lat: 43.42, lon: 22.12, values: { PM10: at(10, 0) } },
+      { id: 'n4', name: 'Gadžin Han', municipality: 'Niš', lat: 43.22, lon: 22.03, values: { PM10: at(10, 0) } },
+      { id: 'n5', name: 'Merošina', municipality: 'Niš', lat: 43.28, lon: 21.72, values: { PM10: at(10, 0) } },
+    ]);
+    const marks = buildMarks(sparse, projection, { lens: 'worst', minDistance: markerSpacing(projection.width, 700) });
+    expect(marks).toHaveLength(5);
+    expect(marks.every((mark) => mark.type === 'station' && unitsToKm(geometry, mark.shift) <= CLUSTER_SHIFT_KM)).toBe(true);
+  });
+
+  it('stanice bez poznatog okruga i članovi bez kategorije: grupa broji „bez kategorije“, nepoznat okrug se ne grupiše', () => {
+    const mixed = make([
+      { id: 'a', name: 'Kraljevo A', municipality: 'Kraljevo', values: { PM10: at(10, 0) }, category: 0 },
+      { id: 'b', name: 'Kraljevo B', municipality: 'Kraljevo', values: { PM10: at(40, 1) }, category: 1, ageHours: 30 },
+      { id: 'c', name: 'Kraljevo C', municipality: 'Kraljevo', noSnapshot: true },
+      { id: 'd', name: 'Kraljevo D', municipality: 'Kraljevo', values: { PM10: at(130, 3) }, category: 3 },
+    ]);
+    const marks = buildMarks(mixed, projection, { lens: 'worst', minDistance: serbia });
+    const [cluster] = marks;
+    expect(cluster.type).toBe('cluster');
+    if (cluster.type !== 'cluster') return;
+    expect(cluster.count).toBe(4);
+    expect(cluster.unranked).toBe(2);
+    expect(cluster.byRank).toEqual([1, 0, 0, 1, 0, 0]);
+    // Pri jednakom broju lošija kategorija boji grupu.
+    expect(cluster.rank).toBe(3);
+    expect(cluster.alert).toBe(true);
+    expect(cluster.label).toBe('Raški okrug · 4 stanice · Dobar 1, Zagađen 1, bez kategorije 2 — dodir otvara okrug');
+    const summary = summarizeMarkers(marks);
+    expect(summary.stale).toBe(1);
+    expect(summary.none).toBe(1);
+    // „Približna lokacija“ je vrsta oznake samo uz kategoriju (zastarela i bez podataka imaju svoje).
+    expect(summary.approx).toBe(2);
+    expect(summary.alert).toBe(1);
   });
 });

@@ -12,7 +12,8 @@
  *    `LATE_FEED_HOURS` sati stariji nego obično (stanice su i dalje sveže, ali ništa nije „uživo“);
  *  - `smog`  – izmišljena epizoda smoga (medijana PM10 ≈ 300 µg/m³, većina stanica „Veoma
  *    zagađen“/„Opasan“) – oblik podataka bira fixture (`buildDemoCore(now, 'smog')`);
- *  - `beograd` – devet stanica u beogradskom klasteru umesto dve (33 stanice ukupno).
+ *  - `beograd` – 33 izmišljene beogradske stanice umesto dve (57 stanica ukupno): na celoj mapi
+ *    jedna grupa „Grad Beograd · 33“, uvećan okrug ih razdvaja.
  * Servis postoji samo u demo režimu (`createDataService` → `isDemoMode()`), pa scenariji u `rayfin`
  * režimu nisu dostupni.
  */

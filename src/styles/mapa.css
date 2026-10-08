@@ -1,6 +1,7 @@
 /*
  * Stranica „Mapa“: markeri sa sjajem, pulsirajući oreol (kategorija ≥ Zagađen), talasi
- * oko izabrane stanice i sloj „izmaglice“ (mutni krugovi u boji kategorije).
+ * oko izabrane stanice, grupe stanica (disk sa brojem i prstenom udela kategorija) i sloj
+ * „izmaglice“ (mutni krugovi u boji kategorije).
  *
  * Samo tokeni iz src/main.css (var(--cat-N), --panel-solid, --accent …). Boja markera
  * dolazi kroz `--mk` (inline stil). Globalni blok za smanjeno kretanje (main.css) gasi
@@ -267,6 +268,78 @@
   animation-delay: 1.4s;
 }
 
+/* ------------------------------------------------------------------ */
+/* Grupa stanica (gust okrug na celoj mapi Srbije)                     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Stakleni disk sa brojem stanica i tankim prstenom udela kategorija (isti jezik kao prsten
+ * heroja); ispuna je najčešća kategorija (`--mk`) sa malim alfa, da se broj čita. Dugme je 36 px
+ * (dodir), disk `--ck-size` (28 px, kompaktno 20 px – isto kao CLUSTER_DISC_PX u markers.ts).
+ * `--mk-size` ovde određuje samo oreol upozorenja (prsten od 32 px koji pulsira do 54 px).
+ */
+.mk--cluster {
+  --mk-size: 18px;
+  width: 36px;
+  height: 36px;
+}
+
+.smap--compact .mk--cluster {
+  --mk-size: 13px;
+  width: 32px;
+  height: 32px;
+}
+
+.mk__disc {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--ck-size, 28px);
+  height: var(--ck-size, 28px);
+  background: color-mix(in oklab, var(--mk) 26%, color-mix(in oklab, var(--panel-solid) 92%, transparent));
+  box-shadow:
+    0 0 0 2px var(--panel-solid),
+    0 6px 16px -4px rgb(0 0 0 / 0.4),
+    0 0 14px 1px color-mix(in oklab, var(--mk) 45%, transparent);
+  transition: transform 0.18s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.mk__ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  transform: rotate(-90deg);
+}
+
+.mk__ring circle {
+  fill: none;
+}
+
+.mk__count {
+  position: relative;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+@media (hover: hover) {
+  .mk--cluster:hover .mk__disc {
+    transform: scale(1.08);
+  }
+}
+
+/* Grupa koja sadrži izabranu stanicu: prsten akcenta kao na izabranoj tački (talasi su iz .mk__ripple). */
+.mk--cluster[data-selected='true'] .mk__disc {
+  box-shadow:
+    0 0 0 2px var(--panel-solid),
+    0 0 0 4px var(--accent),
+    0 0 18px 4px color-mix(in oklab, var(--mk) 60%, transparent);
+}
+
 /* Male oznake za legendu (iste klase, bez interakcije). */
 .mk-key {
   --mk-size: 10px;
@@ -308,6 +381,16 @@
 
 .mk-key[data-dim='true'] {
   opacity: 0.35;
+}
+
+/* Oznaka grupe u legendi: mali disk sa prstenom u bojama kategorija. */
+.mk-key[data-kind='cluster'] .mk__disc {
+  width: 14px;
+  height: 14px;
+  background:
+    radial-gradient(circle, color-mix(in oklab, var(--muted) 18%, var(--panel-solid)) 56%, transparent 60%),
+    conic-gradient(var(--cat-1) 0 45%, var(--cat-2) 45% 85%, var(--cat-3) 85% 100%);
+  box-shadow: none;
 }
 
 /* ------------------------------------------------------------------ */

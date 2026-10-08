@@ -2,6 +2,8 @@ import { classify, THRESHOLDS_1H } from '@shared/aqi';
 import { parseSnapshotRecord } from '@shared/aggregate';
 import { describe, expect, it } from 'vitest';
 
+import { municipalityPosition } from '@/lib/stations';
+
 import { buildDemoCore, buildDemoSyncRuns, buildSpecs, SMOG_PM10_MEDIAN, smogRamp, type DemoCore } from './fixture';
 
 /** Različita doba dana (UTC): oblik epizode ne sme da zavisi od sata u kom se demo otvori. */
@@ -89,26 +91,51 @@ describe('scenario `smog` – izmišljena epizoda smoga', () => {
   });
 });
 
-describe('scenario `beograd` – gust klaster', () => {
-  it('devet izmišljenih beogradskih stanica u krugu od 12 km, mešovitih kategorija; ostatak mreže nepromenjen', () => {
+describe('scenario `beograd` – gusta gradska mreža', () => {
+  const isBeograd = (name: string) => /^Demo stanica Beograd \d{1,2}$/.test(name);
+
+  it('33 izmišljene beogradske stanice: gust centar (8 u 4,5 km), prsten do 15 km, razmak ≥ 2,2 km, sve u Gradu Beogradu; ostatak mreže nepromenjen', () => {
     const now = new Date(TIMES[3]);
     const core = buildDemoCore(now, 'beograd');
-    expect(core.stations).toHaveLength(33);
-    const beograd = core.stations.filter((s) => /^Demo stanica Beograd \d$/.test(s.name));
-    expect(beograd).toHaveLength(9);
+    expect(core.stations).toHaveLength(57);
+    const beograd = core.stations.filter((s) => isBeograd(s.name));
+    expect(beograd).toHaveLength(33);
+    expect(new Set(beograd.map((s) => s.code)).size).toBe(33);
+    for (const station of beograd) {
+      expect(station.code).toMatch(/^DEMO-\d{3}$/);
+      expect(municipalityPosition(station.municipality)?.okrug).toBe('Grad Beograd');
+    }
+    const centre = { lat: 44.81, lon: 20.46 };
     const points = beograd.map((s) => ({ lat: s.latitude as number, lon: s.longitude as number }));
-    for (const point of points) {
-      expect(point.lat).toBeGreaterThan(44.7);
-      expect(point.lat).toBeLessThan(44.9);
-    }
+    const fromCentre = points.map((point) => distanceKm(centre, point));
+    expect(fromCentre.filter((d) => d <= 4.5)).toHaveLength(8);
+    expect(fromCentre.filter((d) => d > 4.5)).toHaveLength(25);
+    expect(Math.max(...fromCentre)).toBeLessThanOrEqual(15);
     for (let i = 0; i < points.length; i++) {
-      for (let j = i + 1; j < points.length; j++) expect(distanceKm(points[i], points[j])).toBeLessThanOrEqual(12);
+      for (let j = i + 1; j < points.length; j++) expect(distanceKm(points[i], points[j])).toBeGreaterThanOrEqual(2.2);
     }
-    const ranks = new Set(core.snapshots.filter((s) => beograd.some((b) => b.id === s.station_id)).map((s) => s.category));
-    expect(ranks.size).toBeGreaterThanOrEqual(2);
-    // Ostale stanice su iste kao u podrazumevanom demou.
+    // Ostale stanice su iste kao u podrazumevanom demou; dnevnik broji 57 stanica.
     const others = (c: DemoCore) => c.stations.filter((s) => !/Beograd/.test(s.name)).map((s) => s.name);
     expect(others(core)).toEqual(others(buildDemoCore(now)));
-    expect(buildDemoSyncRuns(now, core.stations.length)[0].stationsSeen).toBe(33);
+    expect(buildDemoSyncRuns(now, core.stations.length)[0].stationsSeen).toBe(57);
+  });
+
+  it.each(TIMES)('u %s: beogradske stanice su mešovitih kategorija (bar dve) i sve sveže', (iso) => {
+    const now = new Date(iso);
+    const core = buildDemoCore(now, 'beograd');
+    const ids = new Set(core.stations.filter((s) => isBeograd(s.name)).map((s) => s.id));
+    const ranks = core.snapshots.filter((s) => ids.has(s.station_id)).map((s) => s.category);
+    expect(ranks).toHaveLength(33);
+    expect(new Set(ranks).size).toBeGreaterThanOrEqual(2);
+    expect(freshSnapshots(core, now).length).toBeGreaterThanOrEqual(33);
+  });
+
+  it.each([TIMES[3], TIMES[4]])('u %s (veče / ponoć): bar tri beogradske stanice su „Zagađen“ – grupa na mapi dobija oreol', (iso) => {
+    const now = new Date(iso);
+    const core = buildDemoCore(now, 'beograd');
+    const ids = new Set(core.stations.filter((s) => isBeograd(s.name)).map((s) => s.id));
+    const ranks = core.snapshots.filter((s) => ids.has(s.station_id)).map((s) => s.category);
+    expect(ranks.filter((rank) => rank >= 3).length).toBeGreaterThanOrEqual(3);
+    expect(ranks.filter((rank) => rank >= 3).length).toBeLessThan(15);
   });
 });

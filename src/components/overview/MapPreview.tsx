@@ -20,8 +20,9 @@ const TOP_OKRUGS = 4;
 /**
  * Pregled mape: ista `SerbiaMap` kao na stranici Mapa, u kompaktnom obliku (bez mreže,
  * razmernika, legende i izmaglice – ovde nema mesta za natpis da je izmaglica ilustracija).
- * Boja tačke je kategorija kroz sočivo, izabrani okrug je istaknut, a stanice van njega
- * prigušene; neaktivne (ugašene) stanice se ne crtaju. Klik na stanicu je otvara na Mapi; ispod
+ * Boja tačke je kategorija kroz sočivo, izabrani okrug je uvećan i istaknut, a stanice van njega
+ * prigušene; gust okrug je na celoj mapi grupa stanica – dodir na nju filtrira stranicu po tom
+ * okrugu (`setOkrug`); neaktivne (ugašene) stanice se ne crtaju. Klik na stanicu je otvara na Mapi; ispod
  * je tekstualna legenda sa brojem stanica, a pored mape okruzi sa najvišom medijanom i brojem
  * stanica u uzorku (klik filtrira stranicu).
  */
@@ -65,6 +66,7 @@ export function MapPreview({ className, style }: { className?: string; style?: C
             compact
             showHaze={false}
             onSelect={openStation}
+            onOkrug={setOkrug}
             maxHeight="var(--ov-map-h, 360px)"
             className="w-full"
           />

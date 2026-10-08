@@ -187,7 +187,9 @@ Fajlovi: `src/lib/` (insights.ts, stations.ts, syncRules.ts, coverage.ts, format
    lokacija“), a ne stvarna lokacija stanice. Markeri koji bi se na ekranu preklopili (Beograd, Niš)
    razmaknuti su tek koliko tačka zahteva (12 px + 2 px); legenda tada kaže „Preklopljene stanice su
    razmaknute (do N km)“, a tooltip pomerene stanice koliko je pomerena – položaj takve tačke nije
-   geografski tačan.
+   geografski tačan. Gust okrug (bar tri stanice koje bi se na celoj mapi morale razmaći više od 5 km,
+   npr. Beograd) prikazan je kao jedna grupa u težištu svojih stanica – ni to nije položaj stanice; dodir
+   na grupu uvećava mapu na okrug, gde su tačke na pravim mestima (pomak najviše 1–2 km).
 7. **Skup stanica se menja.** Stanice se dodaju, gase i menjaju identifikatore; aplikacija prati
    `active=true` listu pri svakoj sinhronizaciji i nikad ne briše stare redove.
 8. **Jedinice i vremenska zona.** Sve koncentracije su u µg/m³; vremena iz API-ja su UTC, a prikaz i

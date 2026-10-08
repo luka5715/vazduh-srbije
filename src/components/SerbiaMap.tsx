@@ -1,23 +1,28 @@
-import { useCallback, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 
 import { PARAMETER_LABELS, UNIT } from '@shared/aqi';
 
-import { ChartTooltip } from '@/components/charts/ChartTooltip';
-import { mapFrame, mapGeometry, unitsToKm } from '@/components/map/geometry';
+import { ChartTooltip, TooltipRow } from '@/components/charts/ChartTooltip';
+import { districtBounds, mapFrame, mapGeometry, unitsToKm } from '@/components/map/geometry';
 import {
-  buildMarkers,
+  buildMarks,
+  CLUSTER_DISC_PX,
+  clusterNote,
   MARKER_DOT_PX,
   markerColor,
   markerSpacing,
+  markInFrame,
   neighborInDirection,
   spacingNote,
   summarizeMarkers,
+  type MapCluster,
+  type MapMark,
   type MapMarker,
   type MarkerKind,
   type MarkerSummary,
   type NavDirection,
 } from '@/components/map/markers';
-import { CategoryChip } from '@/components/ui/Category';
+import { CategoryChip, CategoryDot } from '@/components/ui/Category';
 import { useMeasure } from '@/hooks/useMeasure';
 import { CATEGORIES, catVar, RANKS } from '@/lib/category';
 import { cn } from '@/lib/cn';
@@ -34,9 +39,14 @@ export interface SerbiaMapProps {
   selectedId?: string | null;
   /** Klik/Enter na marker. Bez ovoga markeri su i dalje fokusabilni (tooltip), ali ništa ne biraju. */
   onSelect?: (stationId: string) => void;
+  /**
+   * Dodir/Enter na grupu stanica (gust okrug): pozivalac postavlja filter okruga (`?okrug=`), a
+   * mapa se uveća na taj okrug. Bez ovoga grupa je i dalje fokusabilna (tooltip), ali ništa ne otvara.
+   */
+  onOkrug?: (okrug: string) => void;
   /** Sočivo polutanta: boja markera je kategorija tog polutanta (podrazumevano `'worst'`). */
   lens?: Lens;
-  /** Izabrani okrug: njegov okrug se ističe, stanice van njega su prigušene. */
+  /** Izabrani okrug: mapa se uveća na njega, njegov obris se ističe, stanice van njega su prigušene. */
   okrug?: string | null;
   /**
    * Kompaktni pregled (npr. kartica na drugoj stranici): manje tačke, bez legende,
@@ -71,8 +81,13 @@ const ARROWS: Record<string, NavDirection> = { ArrowUp: 'up', ArrowDown: 'down',
 /**
  * Poluprečnik kruga izmaglice (viewBox jedinice ≈ 0,58 km): ISTI za sve kategorije – veći krug
  * za lošiju kategoriju bi izgledao kao veće zagađeno područje, a merenje je samo u tački.
+ * Na uvećanom okrugu se smanjuje srazmerno okviru, pa na ekranu ostaje iste veličine.
  */
 export const HAZE_RADIUS = 46;
+/** Izmaglica grupe stanica je 1,5× šira od izmaglice jedne stanice. */
+export const CLUSTER_HAZE_SCALE = 1.5;
+/** Najveće dugme oznake (grupa, 36 px): oznaka ostaje na mapi dok joj celo dugme staje u okvir. */
+const MARK_BUTTON_PX = 36;
 
 /** Natpis uz sloj izmaglice (legenda Mape). */
 export const HAZE_CAPTION = 'Izmaglica je ilustracija oko stanica – nije merenje između stanica.';
@@ -84,17 +99,24 @@ export const HAZE_CAPTION = 'Izmaglica je ilustracija oko stanica – nije meren
  * kontejnera (viši/širi okvir → mreža se nastavlja oko zemlje).
  *
  * Stanice su pravi `<button>` elementi preko mape (cilj 28 px, tooltip i na fokus). Na mapu
- * se ulazi jednim Tab-om; strelice vode do najbliže stanice u tom smeru, Home/End do prve
+ * se ulazi jednim Tab-om; strelice vode do najbliže oznake u tom smeru, Home/End do prve
  * (severno) i poslednje (južno), Enter bira. Kategorija ≥ „Zagađen“ pulsira; izabrana ima talase.
  *
  * Preklopljene tačke se razmiču tek koliko tačka zauzima piksela (`markerSpacing`: prečnik
  * tačke + 2 px preračunat u jedinice okvira iz izmerene širine), pa veća mapa pomera manje;
  * legenda kaže najveći pomak u km („razmaknute (do N km)“), a tooltip pomerene stanice koliko.
+ * Okrug čije bi se tačke morale pomeriti više od 5 km (bar tri stanice) je na celoj mapi JEDNA
+ * grupa (`MapCluster`: disk sa brojem i prstenom udela kategorija); dodir/Enter je otvara kroz
+ * `onOkrug`, a mapa se uveća na okrug (`districtBounds` → `mapFrame`), gde se tačke razmiču za
+ * ≤ 1–2 km i grupe nema. Oznake van uvećanog okvira se ne crtaju; prigušene stanice susednih
+ * okruga u okviru ostaju kao kontekst. Izabrana stanica u grupi: grupa nosi prsten akcenta, talase
+ * i natpis sa imenom stanice (broj grupe ostaje pošten).
  */
 export function SerbiaMap({
   views,
   selectedId = null,
   onSelect,
+  onOkrug,
   lens = 'worst',
   okrug = null,
   compact = false,
@@ -113,33 +135,62 @@ export function SerbiaMap({
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [cursorId, setCursorId] = useState<string | null>(null);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
+  /** Grupa otvorena tastaturom nestaje sa mape – fokus posle uvećanja ide na prvu oznaku. */
+  const refocus = useRef(false);
 
-  const frame = useMemo(() => mapFrame(geometry, size.width, size.height), [geometry, size.width, size.height]);
+  // Izabrani okrug uvećava okvir na njegov pravougaonik (bez animacije – viewBox se ne pretapa).
+  const focus = okrug ? districtBounds(geometry, okrug) : null;
+  const zoomed = focus !== null;
+  const frame = useMemo(() => mapFrame(geometry, size.width, size.height, focus), [geometry, size.width, size.height, focus]);
   const { vb } = frame;
   const leftPct = (x: number) => ((x - vb.x) / vb.w) * 100;
   const topPct = (y: number) => ((y - vb.y) / vb.h) * 100;
+  const unitsPerPx = size.width > 0 ? vb.w / size.width : 0;
 
   // Razmak tačaka iz piksela: dok okvir nije izmeren važi rezervni razmak (jedan kadar).
   const minDistance = markerSpacing(vb.w, size.width, compact ? MARKER_DOT_PX.compact : MARKER_DOT_PX.full);
-  const markers = useMemo(() => buildMarkers(views, projection, { lens, okrug, minDistance }), [views, projection, lens, okrug, minDistance]);
-  const summary = useMemo(() => summarizeMarkers(markers), [markers]);
+  const allMarks = useMemo(() => buildMarks(views, projection, { lens, okrug, minDistance, selectedId }), [views, projection, lens, okrug, minDistance, selectedId]);
+  // Uvećan okrug seče ostatak zemlje: ostaju oznake čije celo dugme staje u okvir (fokus na
+  // isečeno dugme bi pomerio sadržaj okvira).
+  const marks = useMemo(
+    () => (zoomed ? allMarks.filter((mark) => markInFrame(mark, vb, (MARK_BUTTON_PX / 2) * unitsPerPx)) : allMarks),
+    [allMarks, zoomed, vb, unitsPerPx],
+  );
+  const summary = useMemo(() => summarizeMarkers(marks), [marks]);
   const shiftKm = (units: number) => unitsToKm(geometry, units);
   const withoutPosition = views.filter((view) => view.position === null).length;
-  const hovered = markers.find((m) => m.id === hoverId) ?? null;
-  const selected = markers.find((m) => m.id === selectedId) ?? null;
+  const hovered = marks.find((mark) => mark.id === hoverId) ?? null;
+  const selected = marks.find((mark): mark is MapMarker => mark.type === 'station' && mark.id === selectedId) ?? null;
+  // Izabrana stanica u grupi: grupa nosi prsten akcenta, talase i natpis sa imenom stanice.
+  const selectedCluster = marks.find((mark): mark is MapCluster => mark.type === 'cluster' && mark.selected) ?? null;
+  const selectedMember = selectedCluster?.members.find((member) => member.id === selectedId) ?? null;
   const legend = showLegend ?? !compact;
   const haze = (showHaze ?? true) && !compact;
+  // Izmaglica iste veličine na ekranu i na uvećanom okrugu (poluprečnik u jedinicama prati okvir).
+  const hazeRadius = HAZE_RADIUS * Math.min(1, vb.w / projection.width);
   const activeDistrict = okrug ? (districts.find((district) => district.name === okrug) ?? null) : null;
   const measured = size.width > 0;
+  const stationCount = marks.reduce((count, mark) => count + (mark.type === 'cluster' ? mark.count : 1), 0);
 
-  // Jedan tab-stop za sve stanice (roving tabindex): poslednja fokusirana, izabrana ili prva.
+  // Jedan tab-stop za sve oznake (roving tabindex): poslednja fokusirana, izabrana ili prva.
   const tabbableId =
-    (cursorId && markers.some((m) => m.id === cursorId) ? cursorId : null) ?? selected?.id ?? markers[0]?.id ?? null;
+    (cursorId && marks.some((mark) => mark.id === cursorId) ? cursorId : null) ?? selected?.id ?? selectedCluster?.id ?? marks[0]?.id ?? null;
 
   const setButton = useCallback((id: string, node: HTMLButtonElement | null) => {
     if (node) buttons.current.set(id, node);
     else buttons.current.delete(id);
   }, []);
+
+  useEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    // Dugme grupe je nestalo dok je bilo fokusirano (fokus je pao na <body>): prva oznaka u okviru.
+    const first = marks[0]?.id;
+    if (first && document.activeElement === document.body) {
+      setCursorId(first);
+      buttons.current.get(first)?.focus();
+    }
+  }, [marks]);
 
   const clearHover = (id: string) => setHoverId((current) => (current === id ? null : current));
   const focusMarker = (id: string | null | undefined) => {
@@ -151,16 +202,42 @@ export function SerbiaMap({
     const direction = ARROWS[event.key];
     if (direction) {
       event.preventDefault();
-      focusMarker(neighborInDirection(markers, id, direction));
+      focusMarker(neighborInDirection(marks, id, direction));
     } else if (event.key === 'Home' || event.key === 'End') {
       event.preventDefault();
-      focusMarker(event.key === 'Home' ? markers[0]?.id : markers[markers.length - 1]?.id);
+      focusMarker(event.key === 'Home' ? marks[0]?.id : marks[marks.length - 1]?.id);
     } else if (event.key === 'Escape') {
       setHoverId(null);
     }
   };
+  const openCluster = (event: MouseEvent<HTMLButtonElement>, cluster: MapCluster) => {
+    if (!onOkrug) return;
+    // Enter/Space daju klik bez pokazivača (`detail` 0): posle uvećanja fokus prelazi na prvu stanicu.
+    if (event.detail === 0) refocus.current = true;
+    onOkrug(cluster.okrug);
+  };
 
-  const label = `Mapa Srbije sa ${markers.length} ${pluralSr(markers.length, 'stanicom', 'stanice', 'stanica')}; boja tačke je kategorija kroz sočivo ${lensLabel(lens)}${okrug ? `, istaknut ${okrugLabel(okrug)}` : ''}. Stanice su dugmad preko mape.`;
+  /** Zajednički atributi dugmeta oznake (stanica ili grupa): položaj, fokus, tooltip, tastatura. */
+  const markProps = (mark: MapMark, zIndex: number) => ({
+    ref: (node: HTMLButtonElement | null) => setButton(mark.id, node),
+    type: 'button' as const,
+    tabIndex: mark.id === tabbableId ? 0 : -1,
+    'aria-label': mark.label,
+    onPointerEnter: () => setHoverId(mark.id),
+    onPointerLeave: () => clearHover(mark.id),
+    onFocus: () => {
+      setCursorId(mark.id);
+      setHoverId(mark.id);
+    },
+    onBlur: () => clearHover(mark.id),
+    onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => onMarkerKey(event, mark.id),
+    style: { left: `${leftPct(mark.x)}%`, top: `${topPct(mark.y)}%`, zIndex, '--mk': markerColor(mark) } as CSSProperties,
+  });
+
+  const groupCount = summary.clusters.length;
+  const label = `Mapa Srbije sa ${stationCount} ${pluralSr(stationCount, 'stanicom', 'stanice', 'stanica')}${
+    groupCount ? `, od toga ${summary.clustered} u ${groupCount} ${pluralSr(groupCount, 'grupi', 'grupe', 'grupa')}` : ''
+  }; boja tačke je kategorija kroz sočivo ${lensLabel(lens)}${okrug ? `, uvećan i istaknut ${okrugLabel(okrug)}` : ''}. Stanice su dugmad preko mape.`;
   const vbAttr = `${vb.x.toFixed(2)} ${vb.y.toFixed(2)} ${vb.w.toFixed(2)} ${vb.h.toFixed(2)}`;
 
   return (
@@ -170,7 +247,8 @@ export function SerbiaMap({
         <div className="flex min-w-0 shrink-0 grow basis-auto flex-col gap-4 @min-[600px]:self-stretch">
           <div
             ref={areaRef}
-            className="smap__area relative min-w-0 shrink-0 grow basis-auto"
+            className={cn('smap__area relative min-w-0 shrink-0 grow basis-auto', zoomed && 'overflow-hidden')}
+            data-zoomed={zoomed || undefined}
             style={{ aspectRatio: `${projection.width} / ${projection.height}`, maxHeight }}
           >
             {/* Mreža stepeni preko celog okvira (blago se gubi ka uglovima). */}
@@ -221,9 +299,15 @@ export function SerbiaMap({
                   ))}
                 </defs>
                 <g clipPath={`url(#${uid}-land)`}>
-                  {markers.map((marker) =>
-                    marker.rank === null || marker.dimmed ? null : (
-                      <circle key={marker.id} cx={marker.x} cy={marker.y} r={HAZE_RADIUS} fill={`url(#${uid}-h${marker.rank})`} />
+                  {marks.map((mark) =>
+                    mark.rank === null || mark.dimmed ? null : (
+                      <circle
+                        key={mark.id}
+                        cx={mark.x}
+                        cy={mark.y}
+                        r={mark.type === 'cluster' ? hazeRadius * CLUSTER_HAZE_SCALE : hazeRadius}
+                        fill={`url(#${uid}-h${mark.rank})`}
+                      />
                     ),
                   )}
                 </g>
@@ -247,49 +331,53 @@ export function SerbiaMap({
                   ) : null,
                 )}
                 <span className="absolute bottom-0 left-0 flex flex-col gap-1" style={{ width: `${frame.scaleBarPct}%` }}>
-                  <span className="tnum">50 km</span>
+                  <span className="tnum">{frame.scaleBarKm} km</span>
                   <span className="block h-1.5 border-x border-b border-muted/70" />
                 </span>
               </div>
             ) : null}
 
-            <div role="group" aria-label={`Stanice na mapi (${markers.length})`} aria-describedby={hintId} className="pointer-events-none absolute inset-0">
+            <div role="group" aria-label={`Stanice na mapi (${stationCount})`} aria-describedby={hintId} className="pointer-events-none absolute inset-0">
               <p id={hintId} className="sr-only">
-                Strelice vode do najbliže stanice u tom smeru, Home i End do prve i poslednje, Enter bira stanicu.
+                Strelice vode do najbliže oznake u tom smeru, Home i End do prve i poslednje, Enter bira stanicu; grupu stanica (broj u krugu) Enter otvara kao
+                uvećan okrug.
               </p>
-              {markers.map((marker) => {
-                const isSelected = marker.id === selectedId;
-                const style = {
-                  left: `${leftPct(marker.x)}%`,
-                  top: `${topPct(marker.y)}%`,
-                  zIndex: isSelected ? 6 : marker.dimmed ? 1 : marker.rank === null ? 2 : 3 + Number(marker.alert),
-                  '--mk': markerColor(marker),
-                } as CSSProperties;
+              {marks.map((mark) => {
+                if (mark.type === 'cluster') {
+                  return (
+                    <button
+                      key={mark.id}
+                      {...markProps(mark, mark.selected ? 6 : mark.dimmed ? 1 : 5)}
+                      className="mk mk--cluster"
+                      data-dim={mark.dimmed && !mark.selected ? true : undefined}
+                      data-selected={mark.selected || undefined}
+                      onClick={(event) => openCluster(event, mark)}
+                    >
+                      {mark.alert ? <span aria-hidden className="mk__halo" /> : null}
+                      {mark.selected && !compact ? (
+                        <>
+                          <span aria-hidden className="mk__ripple" />
+                          <span aria-hidden className="mk__ripple mk__ripple--late" />
+                        </>
+                      ) : null}
+                      <ClusterDisc cluster={mark} compact={compact} />
+                    </button>
+                  );
+                }
+                const isSelected = mark.id === selectedId;
                 return (
                   <button
-                    key={marker.id}
-                    ref={(node) => setButton(marker.id, node)}
-                    type="button"
+                    key={mark.id}
+                    {...markProps(mark, isSelected ? 6 : mark.dimmed ? 1 : mark.rank === null ? 2 : 3 + Number(mark.alert))}
                     className="mk"
-                    tabIndex={marker.id === tabbableId ? 0 : -1}
-                    data-kind={marker.kind}
-                    data-dim={marker.dimmed && !isSelected ? true : undefined}
+                    data-kind={mark.kind}
+                    data-dim={mark.dimmed && !isSelected ? true : undefined}
                     data-selected={isSelected || undefined}
-                    aria-label={marker.label}
                     aria-pressed={onSelect ? isSelected : undefined}
-                    onClick={onSelect ? () => onSelect(marker.id) : undefined}
-                    onPointerEnter={() => setHoverId(marker.id)}
-                    onPointerLeave={() => clearHover(marker.id)}
-                    onFocus={() => {
-                      setCursorId(marker.id);
-                      setHoverId(marker.id);
-                    }}
-                    onBlur={() => clearHover(marker.id)}
-                    onKeyDown={(event) => onMarkerKey(event, marker.id)}
-                    style={style}
+                    onClick={onSelect ? () => onSelect(mark.id) : undefined}
                   >
                     <span aria-hidden className="mk__glow" />
-                    {marker.alert ? <span aria-hidden className="mk__halo" /> : null}
+                    {mark.alert ? <span aria-hidden className="mk__halo" /> : null}
                     {isSelected && !compact ? (
                       <>
                         <span aria-hidden className="mk__ripple" />
@@ -303,8 +391,11 @@ export function SerbiaMap({
               })}
             </div>
 
-            {/* Ime izabrane stanice uz tačku (ne hvata pokazivač – markeri ispod ostaju dostupni). */}
+            {/* Ime izabrane stanice uz tačku ili uz grupu koja je sadrži (ne hvata pokazivač – markeri ispod ostaju dostupni). */}
             {selected && !compact && measured ? <SelectedLabel marker={selected} left={leftPct(selected.x)} top={topPct(selected.y)} lens={lens} /> : null}
+            {selectedCluster && selectedMember && !compact && measured ? (
+              <SelectedLabel marker={selectedMember} left={leftPct(selectedCluster.x)} top={topPct(selectedCluster.y)} lens={lens} gapPx={CLUSTER_DISC_PX.full / 2 + 5} />
+            ) : null}
 
             {hovered && measured && (hovered.id !== selectedId || compact)
               ? (() => {
@@ -317,7 +408,7 @@ export function SerbiaMap({
                       placement={below ? 'below' : 'above'}
                       containerWidth={size.width}
                     >
-                      <MarkerTooltip marker={hovered} lens={lens} shiftKm={shiftKm(hovered.shift)} />
+                      {hovered.type === 'cluster' ? <ClusterTooltip cluster={hovered} /> : <MarkerTooltip marker={hovered} lens={lens} shiftKm={shiftKm(hovered.shift)} />}
                     </ChartTooltip>
                   );
                 })()
@@ -331,7 +422,7 @@ export function SerbiaMap({
             summary={summary}
             lens={lens}
             okrug={okrug}
-            total={markers.length}
+            total={marks.length}
             withoutPosition={withoutPosition}
             hiddenInactive={hiddenInactive}
             haze={haze}
@@ -357,6 +448,7 @@ function MapLegend({
   summary: MarkerSummary;
   lens: Lens;
   okrug: string | null;
+  /** Broj oznaka na mapi (stanice + grupe). */
   total: number;
   withoutPosition: number;
   hiddenInactive: number;
@@ -365,8 +457,10 @@ function MapLegend({
   maxShiftKm: number;
 }) {
   const spacing = spacingNote(maxShiftKm);
+  const groups = clusterNote(summary.clusters);
   const ranked = summary.byRank.reduce((sum, count) => sum + count, 0);
-  const inScope = total - summary.dimmed;
+  // Stanice u opsegu: sve oznake, grupe kao broj članova, bez prigušenih.
+  const inScope = total - summary.clusters.length + summary.clustered - summary.dimmed;
   return (
     <div className="smap__legend flex min-w-0 flex-col gap-3.5 @min-[600px]:w-[236px] @min-[600px]:shrink-0 @min-[600px]:pt-1">
       <div className="flex flex-col gap-2">
@@ -402,6 +496,12 @@ function MapLegend({
       </div>
 
       <ul className="flex flex-wrap gap-x-4 gap-y-1.5 border-t border-border pt-3 text-xs text-muted @min-[600px]:flex-col" aria-label="Vrste oznaka na mapi">
+        {summary.clusters.length ? (
+          <li className="inline-flex items-center gap-1.5" data-testid="cluster-key">
+            <ClusterKey />
+            grupa stanica – dodir otvara okrug
+          </li>
+        ) : null}
         <li className="inline-flex items-center gap-1.5">
           <MarkerKey kind="approx" color="var(--muted)" />
           približna lokacija (centar okruga)
@@ -440,6 +540,7 @@ function MapLegend({
 
       <p className="text-xs leading-5 text-muted" data-testid="map-notes">
         Okruzi na Kosovu i Metohiji su prikazani bledo – državna mreža SEPA tamo nema stanica.
+        {groups ? ` ${groups}` : ''}
         {spacing ? ` ${spacing}` : ''}
         {withoutPosition
           ? ` ${withoutPosition} ${pluralSr(withoutPosition, 'stanica nije', 'stanice nisu', 'stanica nije')} na mapi (nepoznata opština).`
@@ -462,6 +563,57 @@ function MarkerKey({ kind, color, halo = false, dim = false }: { kind: MarkerKin
   );
 }
 
+/** Oznaka grupe stanica za legendu: mali disk sa prstenom u bojama kategorija. */
+function ClusterKey() {
+  return (
+    <span aria-hidden data-mark className="mk-key" data-kind="cluster">
+      <span className="mk__disc" />
+    </span>
+  );
+}
+
+/**
+ * Disk grupe stanica: broj stanica (tabelarne cifre, ≥ 11 px) i tanak prsten udela kategorija u
+ * SEPA bojama (isti jezik kao segmentirani prsten heroja; članovi bez kategorije su sivi deo),
+ * ispuna u boji najčešće kategorije (`--mk`) sa malim alfa. Prečnik `CLUSTER_DISC_PX`.
+ */
+function ClusterDisc({ cluster, compact }: { cluster: MapCluster; compact: boolean }) {
+  const size = compact ? CLUSTER_DISC_PX.compact : CLUSTER_DISC_PX.full;
+  const stroke = compact ? 2 : 2.5;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const segments = [
+    ...RANKS.filter((rank) => cluster.byRank[rank] > 0).map((rank) => ({ key: String(rank), value: cluster.byRank[rank], color: catVar(rank) })),
+    ...(cluster.unranked ? [{ key: 'bez', value: cluster.unranked, color: 'var(--faint)' }] : []),
+  ];
+  const gap = segments.length > 1 ? 1.5 : 0;
+  let cursor = 0;
+  return (
+    <span aria-hidden data-mark className="mk__disc" style={{ '--ck-size': `${size}px` } as CSSProperties}>
+      <svg className="mk__ring" viewBox={`0 0 ${size} ${size}`}>
+        {segments.map((segment) => {
+          const share = segment.value / cluster.count;
+          const start = cursor;
+          cursor += share * circumference;
+          return (
+            <circle
+              key={segment.key}
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              stroke={segment.color}
+              strokeWidth={stroke}
+              strokeDasharray={`${Math.max(0.5, share * circumference - gap)} ${circumference}`}
+              strokeDashoffset={-start}
+            />
+          );
+        })}
+      </svg>
+      <span className="mk__count tnum">{formatInt(cluster.count)}</span>
+    </span>
+  );
+}
+
 function readingText(marker: MapMarker, lens: Lens): string | null {
   if (marker.kind === 'stale') return 'zastarelo';
   const { parameter, value } = marker.reading;
@@ -469,8 +621,8 @@ function readingText(marker: MapMarker, lens: Lens): string | null {
   return `${PARAMETER_LABELS[parameter]} ${formatConcentration(value)}`;
 }
 
-/** Natpis izabrane stanice: ime + vrednost kroz sočivo, levo ili desno od tačke. */
-function SelectedLabel({ marker, left, top, lens }: { marker: MapMarker; left: number; top: number; lens: Lens }) {
+/** Natpis izabrane stanice: ime + vrednost kroz sočivo, levo ili desno od tačke (`gapPx` od centra). */
+function SelectedLabel({ marker, left, top, lens, gapPx = 17 }: { marker: MapMarker; left: number; top: number; lens: Lens; gapPx?: number }) {
   // Natpis ide na stranu sa više mesta (ime se skraćuje tek kad ni tu ne staje).
   const flip = left > 50;
   const reading = readingText(marker, lens);
@@ -479,11 +631,11 @@ function SelectedLabel({ marker, left, top, lens }: { marker: MapMarker; left: n
       aria-hidden
       className="pointer-events-none absolute z-[7] flex items-center gap-1.5 rounded-full border border-border-strong bg-[color-mix(in_oklab,var(--panel-solid)_90%,transparent)] py-0.5 pl-2 pr-2.5 text-[12px] font-medium text-ink shadow-float sm:text-[11px]"
       style={{
-        left: flip ? undefined : `calc(${left}% + 17px)`,
-        right: flip ? `calc(${100 - left}% + 17px)` : undefined,
+        left: flip ? undefined : `calc(${left}% + ${gapPx}px)`,
+        right: flip ? `calc(${100 - left}% + ${gapPx}px)` : undefined,
         top: `${top}%`,
         // Natpis nikad ne izlazi iz okvira mape (ime se skraćuje).
-        maxWidth: `min(260px, calc(${flip ? left : 100 - left}% - 19px))`,
+        maxWidth: `min(260px, calc(${flip ? left : 100 - left}% - ${gapPx + 2}px))`,
         transform: 'translateY(-50%)',
       }}
     >
@@ -539,6 +691,26 @@ function MarkerTooltip({ marker, lens, shiftKm }: { marker: MapMarker; lens: Len
       {shiftKm >= SHIFT_NOTE_KM ? (
         <p className="mt-1 text-faint">Tačka je pomerena ≈ {formatNumber(shiftKm, shiftKm < 10 ? 1 : 0)} km da se ne preklapa sa susednom</p>
       ) : null}
+    </>
+  );
+}
+
+/** Tooltip grupe: okrug, broj stanica, raspodela po kategoriji i šta dodir radi. */
+function ClusterTooltip({ cluster }: { cluster: MapCluster }) {
+  return (
+    <>
+      <p className="font-semibold text-ink">{okrugLabel(cluster.okrug)}</p>
+      <p className="text-muted">
+        {formatInt(cluster.count)} {pluralSr(cluster.count, 'stanica', 'stanice', 'stanica')}
+        {cluster.dimmed ? ' · van izabranog okruga' : ''}
+      </p>
+      <div className="mt-1.5">
+        {RANKS.filter((rank) => cluster.byRank[rank] > 0).map((rank) => (
+          <TooltipRow key={rank} swatch={<CategoryDot rank={rank} size={8} />} label={CATEGORIES[rank].label} value={formatInt(cluster.byRank[rank])} />
+        ))}
+        {cluster.unranked ? <TooltipRow swatch={<CategoryDot rank={null} size={8} />} label="bez kategorije" value={formatInt(cluster.unranked)} muted /> : null}
+      </div>
+      <p className="mt-1 text-faint">Dodir otvara okrug uvećan na mapi</p>
     </>
   );
 }

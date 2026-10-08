@@ -22,8 +22,9 @@ import { prefersReducedMotion } from '@/lib/motion';
 import { isInactive, type StationView } from '@/lib/stations';
 
 /**
- * Mapa: velika mapa stanica (sočivo boji markere, filter okruga prigušuje ostale stanice)
- * i detalji izabrane stanice. Izbor se upisuje u `?station=` (duboki link).
+ * Mapa: velika mapa stanica (sočivo boji markere; filter okruga uvećava mapu na okrug i prigušuje
+ * ostale stanice; gust okrug je na celoj mapi grupa koju dodir otvara kroz `setOkrug`) i detalji
+ * izabrane stanice. Izbor se upisuje u `?station=` (duboki link).
  *
  * Raspored:
  *  - xl (≥ 1280 px): mapa levo preko dva reda (5/12, na 2xl 4/12), desno zaglavlje stanice
@@ -100,6 +101,7 @@ export function MapView() {
           lens={lens}
           selectedId={selectedId}
           onSelect={selectStation}
+          onOkrug={setOkrug}
           showHaze={haze}
           hiddenInactive={hiddenInactive}
           afterMap={wide ? strip : null}

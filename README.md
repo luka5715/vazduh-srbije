@@ -51,6 +51,8 @@ Za proveru pojedinih stranica u PNG formatu, npr.:
 `node scripts/screenshots.mjs --views mapa --variants phone-light --format png --out /tmp/snimci`.
 Opcija `--scenario empty|late|smog|beograd` snima demo scenario (`?demo=`, vidi
 [Lokalni razvoj](#lokalni-razvoj)); datoteke tada nose i ime scenarija (`mapa-phone-dark-beograd.png`).
+Scenario `beograd` pokazuje grupu stanica „Grad Beograd · 33“ na celoj mapi; snimak uvećanog okruga se
+dobija adresom sa filterom (`#/?view=mapa&okrug=Grad%20Beograd`).
 
 ## Šta aplikacija prikazuje
 
@@ -81,12 +83,16 @@ prikazuje poruku o tome, a ne tiho neku drugu stanicu.
   okruzima (uz broj stanica u medijani).
 - **Mapa** – ručno crtan SVG Srbije sa granicama okruga; markeri u boji kategorije kroz sočivo; stanice
   bez koordinata stoje u centru svog okruga sa oznakom „približna lokacija“. Markeri koji bi se
-  preklopili (Beograd, Niš) razmiču se na ekranu tek koliko tačka zahteva (12 px + 2 px razmaka);
+  preklopili (Niš, Bor) razmiču se na ekranu tek koliko tačka zahteva (12 px + 2 px razmaka);
   legenda tada kaže „Preklopljene stanice su razmaknute (do N km)“, a tooltip pomerene stanice koliko
-  je pomerena. Pored mape detalj izabrane stanice (bez `?station=` to je „Najlošije sada“ sa Pregleda,
-  i ostaje izabrana posle osvežavanja): trenutne vrednosti po polutantu, grafikon poslednja 24 sata i
-  dnevni maksimumi za 30 dana sa pragovima; svaki grafikon ima i tabelarni prikaz. Na telefonu, dok je
-  detalj ispod ekrana, iznad donje navigacije stoji traka izabrane stanice sa dugmetom „Detalji“.
+  je pomerena. Gust okrug (bar tri stanice koje bi se morale razmaći više od 5 km – Beograd sa 33 stanice)
+  je na celoj mapi **grupa stanica**: disk sa brojem i prstenom udela kategorija; dodir na grupu
+  **uvećava mapu na taj okrug** (isto kao filter okruga), gde su tačke na pravim mestima (pomak ≤ 1–2 km),
+  mreža ide na pola stepena, a razmernik na 20 km; „Ukloni filter“ vraća celu mrežu. Pored mape detalj
+  izabrane stanice (bez `?station=` to je „Najlošije sada“ sa Pregleda, i ostaje izabrana posle
+  osvežavanja): trenutne vrednosti po polutantu, grafikon poslednja 24 sata i dnevni maksimumi za 30 dana
+  sa pragovima; svaki grafikon ima i tabelarni prikaz. Na telefonu, dok je detalj ispod ekrana, iznad
+  donje navigacije stoji traka izabrane stanice sa dugmetom „Detalji“.
 - **Stanice** – sve aktivne stanice (na telefonu kartice: bez filtera prvih 20 i dugme „+N stanica“) sa
   pretragom po nazivu i opštini, okruzima, filterom kategorije, sortiranjem, istaknutom kolonom sočiva i
   promenom prema proseku 24 h; neaktivne (ugašene) stanice samo na zahtev; klik otvara stanicu na Mapi,
@@ -355,7 +361,7 @@ git checkout main
 | Režim | Komanda | Šta radi |
 | --- | --- | --- |
 | Rayfin (pravi backend) | `npm run dev` | `rayfin dev`: koristi Fabric backend (napravi AppBackend ako ne postoji), primenjuje podešavanja i šemu, pokreće Vite i lokalni host funkcija. Potrebna je prethodna prijava `npx rayfin login`. Frontend: <http://localhost:5173> (ovaj origin je u `allowedRedirectUris`). |
-| Demo (bez backenda) | `npm run dev:demo` | Vite na <http://localhost:5174> sa `VITE_SERVICE_MODE=demo`: determinističke izmišljene stanice („Demo stanica …“, šifre `DEMO-…`), svaki ekran nosi traku **„DEMO PODACI — ovo nisu stvarna merenja…“**. Ništa se ne šalje na mrežu. Scenariji parametrom `?demo=` (pre ili posle `#`, npr. `#/?demo=smog`): `empty` (prazna baza, prvi ekran), `late` (SEPA kasni 4 h), `smog` (izmišljena epizoda smoga: medijana PM10 ≈ 300 µg/m³, najjača izmaglica i čestice), `beograd` (devet izmišljenih beogradskih stanica u krugu od 12 km – razmak markera). Traka tada nosi i napomenu o scenariju (`src/services/demoScenario.ts`). |
+| Demo (bez backenda) | `npm run dev:demo` | Vite na <http://localhost:5174> sa `VITE_SERVICE_MODE=demo`: determinističke izmišljene stanice („Demo stanica …“, šifre `DEMO-…`), svaki ekran nosi traku **„DEMO PODACI — ovo nisu stvarna merenja…“**. Ništa se ne šalje na mrežu. Scenariji parametrom `?demo=` (pre ili posle `#`, npr. `#/?demo=smog`): `empty` (prazna baza, prvi ekran), `late` (SEPA kasni 4 h), `smog` (izmišljena epizoda smoga: medijana PM10 ≈ 300 µg/m³, najjača izmaglica i čestice), `beograd` (33 izmišljene beogradske stanice – gust centar i prsten do ~14 km: na celoj mapi grupa „Grad Beograd · 33“, dodir je otvara kao uvećan okrug). Traka tada nosi i napomenu o scenariju (`src/services/demoScenario.ts`). |
 | Samo frontend | `npm run dev:frontend` | Vite bez `rayfin dev`, koristi vrednosti iz `.env.local` (generiše ih `rayfin env --framework vite`). |
 
 U `rayfin` režimu aplikacija **nikad** ne prikazuje demo podatke, ni kao zamenu pri grešci. Lokalna
@@ -380,7 +386,7 @@ prijava u razvoju ide preko tokena iz `rayfin login` (`rayfinLocalDev({ autoLogi
 | `functions:build` | `npm --prefix rayfin/functions run build` | TypeScript build funkcija. |
 | `rayfin:db` | `rayfin up db apply` | Primena šeme baze na deploy-ovanu stavku. |
 | `screenshots` | `node scripts/screenshots.mjs` | Demo build + Playwright snimci (12 JPEG-ova za dokumentaciju) u `docs/screenshots/`; opcije `--views`, `--variants` (sve kombinacije), `--scenario empty\|late\|smog\|beograd` (demo scenario; datoteke `<view>-<variant>-<scenario>`), `--format jpeg\|png`, `--out`, `--no-build`. |
-| `e2e` | `node scripts/e2e.mjs dist-demo dist-demo/e2e` | E2E provere demo build-a u Chromium-u (Playwright, bez mreže): navigacija, paleta, sočivo, okrug, tema, ponovno učitavanje, prelivanje na 390 px, smanjeno kretanje, Stanice posle „Nazad“, neispravan link, Moja stanica, „Kako čitati“, pokrivenost istorije, `?demo=late`, traka izabrane stanice iznad donje navigacije, kartice „+N stanica“, naslov heroja sa dva stanja, KPI brojevi bez odbrojavanja, traka „Uživo“ kao jedno Tab-mesto. Ispisuje OK/FAIL po proveri i „N/M provera prošlo“; izlazni kod 1 ako je bar jedna pala. Prethodno `npm run build:demo`; opšti oblik `node scripts/e2e.mjs <distDir> <outDir>` (snimci provera u `<outDir>`); Playwright/Chromium kao kod `screenshots` (`PLAYWRIGHT_PATH`, `CHROME_PATH`). |
+| `e2e` | `node scripts/e2e.mjs dist-demo dist-demo/e2e` | E2E provere demo build-a u Chromium-u (Playwright, bez mreže): navigacija, paleta, sočivo, okrug, tema, ponovno učitavanje, prelivanje na 390 px, smanjeno kretanje, Stanice posle „Nazad“, neispravan link, Moja stanica, „Kako čitati“, pokrivenost istorije, `?demo=late`, traka izabrane stanice iznad donje navigacije, kartice „+N stanica“, naslov heroja sa dva stanja, KPI brojevi bez odbrojavanja, traka „Uživo“ kao jedno Tab-mesto, `?demo=beograd` (grupa „Grad Beograd · 33“, dodir/Enter je otvara kao uvećan okrug sa 33 tačkama, mrežom na 0,5° i razmernikom 20 km, „Ukloni filter“ vraća grupu, kompaktna mapa Pregleda, telefon 390×664). Ispisuje OK/FAIL po proveri i „N/M provera prošlo“; izlazni kod 1 ako je bar jedna pala. Prethodno `npm run build:demo`; opšti oblik `node scripts/e2e.mjs <distDir> <outDir>` (snimci provera u `<outDir>`); Playwright/Chromium kao kod `screenshots` (`PLAYWRIGHT_PATH`, `CHROME_PATH`). |
 
 ## Kako teku podaci i koliko traje sinhronizacija
 

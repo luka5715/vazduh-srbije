@@ -28,9 +28,10 @@ Frontend radi u dva režima (`VITE_SERVICE_MODE`): `rayfin` (podrazumevano, prav
 podaci se nikad ne prikazuju, ni kao zamena pri grešci (`src/services/dataService.ts`). Demo ima scenarije
 `?demo=empty|late|smog|beograd` (pre ili posle `#`; `src/services/demoScenario.ts`, podaci u
 `src/demo/fixture.ts`): prazna baza, SEPA kasni 4 h, izmišljena epizoda smoga (poslednjih 96 h PM raste do
-medijane PM10 ≈ 300 µg/m³ – najjača izmaglica i najgušće čestice, za proveru kontrasta) i gust beogradski
-klaster (devet izmišljenih stanica u krugu od 12 km umesto dve, mešovitih kategorija – za proveru razmaka
-markera). Traka „DEMO PODACI“ nosi napomenu scenarija (`DEMO_SCENARIO_NOTES`).
+medijane PM10 ≈ 300 µg/m³ – najjača izmaglica i najgušće čestice, za proveru kontrasta) i gusta beogradska
+mreža (33 izmišljene stanice umesto dve – gust centar i prsten do ~14 km, mešovitih kategorija – za proveru
+grupe stanica na celoj mapi i uvećanja okruga). Traka „DEMO PODACI“ nosi napomenu scenarija
+(`DEMO_SCENARIO_NOTES`).
 
 ## 2. Entiteti (`rayfin/data`)
 
@@ -580,19 +581,52 @@ tenantu – izvedeni su iz koda i broja stanica. Konstante su `WRITE_CONCURRENCY
   `STALE_HOURS`) iz `src/lib/stations.ts` – nema drugog izvora istine. Sadrži i pravilo najlošijeg
   polutanta, medijane i okruge i napomenu o preliminarnim podacima.
 
-### 8.6 Mapa: razmak markera i traka izabrane stanice
+### 8.6 Mapa: razmak markera, grupe stanica, uvećan okrug i traka izabrane stanice
 
 - Razmak markera (`src/components/map/markers.ts`) se izvodi iz **piksela**, ne iz viewBox jedinica:
   `markerSpacing(vb.w, izmerenaŠirina, dotPx)` = (tačka 12 px, u kompaktnom pregledu 9 px, + 2 px) ×
-  vb.w / širina – korak od 14 px bez obzira na veličinu mape (≈ 14 km na mapi od ~343 px na desktopu,
-  ≈ 15 km na telefonu); `MIN_MARKER_DISTANCE = 30` jedinica važi samo za prvi, neizmeren kadar.
+  vb.w / širina – korak od 14 px bez obzira na veličinu mape (≈ 14 km na mapi cele Srbije od ~343 px na
+  desktopu, ≈ 15 km na telefonu); `MIN_MARKER_DISTANCE = 30` jedinica važi samo za prvi, neizmeren kadar.
   Razdvajanje je determinističko: odbijanje parova + 120 krugova „opruge“ ka pravom položaju
   (`SPRING_ROUNDS`, `SPRING_PULL`); učestvuju samo tačke sa susedom bliže od 3 koraka. Legenda kaže
   najveći pomak („Preklopljene stanice su razmaknute (do N km)“, `spacingNote`, zaokruženo nagore;
   izostavlja se kad se ništa nije pomerilo), a tooltip pomerene stanice „Tačka je pomerena ≈ X km da se
-  ne preklapa sa susednom“ (od 0,5 km). Granica pristupa: devet stanica u krugu od 12 km (`?demo=beograd`)
-  na mapi od ~343 px traži pomake do ~19–21 km – manje ne može bez zumiranja ili grupisanja, koje nije
-  deo ove verzije.
+  ne preklapa sa susednom“ (od 0,5 km). Granica razmicanja: 33 beogradske stanice prave mreže (ili
+  `?demo=beograd`) na mapi od ~343 px tražile bi pomake do ~44 km, pa korisnik po položaju ne može da nađe
+  svoju stanicu – zato gust okrug postaje grupa (sledeća stavka), a uvećan okrug je razdvaja.
+- **Grupe stanica** (`buildMarks`, tip `MapMark = MapMarker | MapCluster`): posle razmicanja se stanice
+  grupišu po okrugu (`okrugOf`); okrug sa bar `CLUSTER_MIN` (3) stanice čija bi se neka tačka morala
+  pomeriti više od `CLUSTER_SHIFT_KM` (5 km, `unitsToKm`) zamenjuje se JEDNOM grupom u težištu pravih
+  položaja članova, pa se preostale tačke razmaknu ponovo od pravih mesta, sa grupama kao preprekama
+  (poluprečnik diska 28/12 tačke, 4× teže pokretne). Prag je u **km**, a razmak u **px**, pa pravilo zavisi
+  od razmere: na celoj mapi Srbije (14 px ≈ 14 km) grupa nastaje, na uvećanom okrugu (14 px ≈ 3,5 km)
+  nestaje. Izabrani okrug se nikad ne grupiše (grupa bi otvarala već otvoren okrug), ni stanice bez
+  poznatog okruga; izabrana stanica ostaje u grupi (broj ostaje pošten – Mapa podrazumevano bira najlošiju
+  stanicu), a grupa nosi izbor: prsten akcenta, talasi, natpis sa imenom stanice i „sadrži izabranu
+  stanicu“ u pristupačnom imenu (`MapCluster.selected`).
+  Disk (`CLUSTER_DISC_PX` 28 px, kompaktno 20 px; dugme 36/32 px): broj stanica + tanak prsten udela
+  kategorija u SEPA bojama (siv deo za članove bez kategorije), ispuna najčešće kategorije (pri jednakom
+  broju lošije), oreol ako je neki član „Zagađen“ ili lošiji; pristupačno ime „Grad Beograd · 33 stanice ·
+  Prihvatljiv 5, Umeren 22, Zagađen 6 — dodir otvara okrug“. Dodir/Enter/Space → `onOkrug` → `setOkrug`
+  (`?okrug=`) na Mapi i u pregledu mape na Pregledu; grupa je u Tab/strelica redosledu kao stanica, a posle
+  Entera fokus prelazi na prvu stanicu u uvećanom okviru. Legenda: red „grupa stanica – dodir otvara
+  okrug“ i napomena „Gust okrug (Grad Beograd · 33) je prikazan kao grupa stanica; dodir otvara okrug.“
+  (`clusterNote`); `summarizeMarkers` broji članove grupa kao stanice (traka ostaje 87/87). Izmaglica
+  grupe: jedan krug u boji najčešće kategorije, 1,5× poluprečnika (`CLUSTER_HAZE_SCALE`). Rizik: grupa
+  je po okrugu, pa stanica daleko od gustog jezgra istog okruga ulazi u grupu i pomera težište; pogrešno
+  mapirana opština (`opstine-okrug.json`, npr. „Palilula“ je niška) bi stanicu svrstala u tuđu grupu.
+- **Uvećan okrug** (`districtBounds` + `mapFrame(geometry, w, h, focus)` u `geometry.ts`): okvir je
+  pravougaonik okruga iz `okruzi.json` sa 12 % ivice (`FOCUS_PADDING`), najmanje 60 km (`FOCUS_MIN_KM`),
+  proširen duž jedne ose na odnos strana kontejnera; Grad Beograd ≈ 150 × 200 jedinica → uvećanje 4×,
+  razmak tačaka ≈ 3,5 km, pomaci ≤ 2 km (33 demo stanice: 1,5 km na desktopu od 343 px, 1,8 km na telefonu
+  od 326 px, 0,5 km na 420 px). Mreža stepeni ispod 1,5° raspona po užoj osi ide na pola stepena
+  („44,5°N“, `FINE_GRATICULE_SPAN`), razmernik bira najveću od 50/20/10/5 km koja stane u 35 % širine
+  (`scaleBarKm`; Beograd 20 km, a i najmanji okvir od 60 km nosi 20 km). Izmaglica zadržava veličinu na ekranu (`HAZE_RADIUS ×
+  vb.w / 600`). Okvir seče ostatak zemlje (`overflow: hidden`); crtaju se samo oznake čije celo dugme
+  staje u okvir (`markInFrame`, ivica 18 px) i samo po njima ide navigacija strelicama; prigušene stanice
+  susednih okruga u okviru ostaju kao kontekst. ViewBox se ne animira (SVG ga ne pretapa; prelaz je
+  trenutan i tako poštuje smanjeno kretanje). Isto važi za kompaktnu mapu Pregleda. Povratak: „Svi
+  okruzi“, „Prikaži celu mrežu“ ili čip „Ukloni filter“.
 - Na telefonu (< 1024 px) traka izabrane stanice (`.map-strip--fixed` u `src/styles/mapa.css`) je
   fiksirana iznad donje navigacije (`--bottomnav-h`, meri je `AppShell` i uključuje
   `env(safe-area-inset-bottom)`), vidljiva samo dok je panel detalja ispod ekrana (IntersectionObserver u
@@ -667,7 +701,8 @@ izazove gubitak podataka. Šemu nikad ne menjati direktno u SQL bazi (kod je izv
 zakasnelim odgovorima, pravilo o broju sati i ponovni pokušaj upisa), pravila sinhronizacije,
 pokrivenosti (uključujući istekao rubni dan) i grešaka (`tests/frontend/syncRules.test.ts`,
 `tests/frontend/errors.test.ts`) i frontend module (`src/**/*.test.ts(x)`: naslov sa dva stanja, razmak
-markera, brojači, scenariji demo podataka …). Ostale provere: `npm run typecheck`, `npm run lint`,
+markera, grupe stanica i uvećan okrug (`markers.test.ts`, `SerbiaMap.test.tsx`), brojači, scenariji demo
+podataka …). Ostale provere: `npm run typecheck`, `npm run lint`,
 `npm run build:demo`, `npm run functions:build`, `npm run typegen` (idempotentno), `npm run screenshots`.
 E2E provere demo build-a u Chromium-u su u `scripts/e2e.mjs` (`npm run e2e` posle `npm run build:demo`;
 Playwright nije deo CI-ja). CI radni tok je u `.github/workflows/ci.yml`.

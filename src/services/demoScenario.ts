@@ -8,8 +8,9 @@
  *  - `smog`    – izmišljena epizoda smoga („Demo – smog“): poslednja tri dana PM raste do medijane
  *    PM10 ≈ 300 µg/m³, većina stanica je „Veoma zagađen“/„Opasan“ – najjača izmaglica i najgušće
  *    čestice Košave (provera kontrasta i pokreta na maksimumu);
- *  - `beograd` – gust beogradski klaster („Demo – Beograd“): devet izmišljenih stanica u krugu od
- *    12 km umesto dve, mešovitih kategorija – provera razmaka markera na mapi.
+ *  - `beograd` – gusta beogradska mreža („Demo – Beograd“): 33 izmišljene stanice umesto dve (gust
+ *    centar i prsten do ~14 km, mešovitih kategorija, uveče nekoliko „Zagađen“) – na celoj mapi su
+ *    jedna grupa „Grad Beograd · 33“, dodir je otvara kao uvećan okrug (provera grupa i uvećanja).
  */
 
 /** Koliko sati kasnije nego obično SEPA objavljuje merenja u scenariju `?demo=late`. */
@@ -26,7 +27,7 @@ export const DEMO_SCENARIO_NOTES: Record<DemoScenario, string> = {
   empty: 'Scenario: prazna baza.',
   late: `Scenario: SEPA kasni ${LATE_FEED_HOURS} h.`,
   smog: 'Scenario „Demo – smog“: izmišljena epizoda smoga.',
-  beograd: 'Scenario „Demo – Beograd“: izmišljen gust klaster stanica.',
+  beograd: 'Scenario „Demo – Beograd“: 33 izmišljene beogradske stanice (grupa na mapi).',
 };
 
 /** Vrednost parametra `?demo=` → scenario; nepoznata ili prazna vrednost je podrazumevani demo. */

@@ -64,11 +64,42 @@ export interface GeoCollection {
   features: GeoFeature[];
 }
 
+function featureRings(feature: GeoFeature): Ring[] {
+  const { geometry } = feature;
+  return geometry.type === 'Polygon' ? geometry.coordinates : geometry.coordinates.flat();
+}
+
 /** Sve prstenove jednog okruga spaja u jednu putanju (rupe rade uz fill-rule evenodd). */
 export function featureToPath(feature: GeoFeature, projection: Projection): string {
-  const { geometry } = feature;
-  const rings: Ring[] = geometry.type === 'Polygon' ? geometry.coordinates : geometry.coordinates.flat();
-  return rings.map((ring) => ringToPath(ring, projection)).join('');
+  return featureRings(feature)
+    .map((ring) => ringToPath(ring, projection))
+    .join('');
+}
+
+export interface Bounds {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Pravougaonik oko svih tačaka okruga u koordinatama viewBox-a (za uvećan prikaz okruga). */
+export function featureBounds(feature: GeoFeature, projection: Projection): Bounds {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const ring of featureRings(feature)) {
+    for (const [lon, lat] of ring) {
+      const [x, y] = projection.project(lon, lat);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  if (!Number.isFinite(minX)) return { x: 0, y: 0, w: 0, h: 0 };
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
 /** Okruzi na Kosovu i Metohiji (nema SEPA stanica; crtaju se bledo). */

@@ -15,7 +15,9 @@
  *
  * Scenariji (`DemoScenario`, vidi `services/demoScenario`) menjaju samo oblik izmišljenih podataka:
  * `smog` – epizoda smoga poslednja tri dana (medijana PM10 ≈ `SMOG_PM10_MEDIAN`), `beograd` –
- * devet stanica u beogradskom klasteru umesto dve. Podrazumevani skup ostaje nepromenjen.
+ * 33 izmišljene beogradske stanice umesto dve (`BEOGRAD_CLUSTER`: gust centar i prsten do ~14 km,
+ * kao prava gradska mreža – na celoj mapi su jedna grupa, uvećan okrug ih razdvaja). Podrazumevani
+ * skup ostaje nepromenjen.
  */
 
 import { computeDailyStats, computeSnapshot } from '@shared/aggregate';
@@ -115,22 +117,69 @@ const PROFILES: Record<string, Partial<Profile>> = {
   Prokuplje: { pm: 1.0 },
 };
 
+/** Centar izmišljene beogradske mreže (≈ Trg republike). */
+const BEOGRAD_CENTRE = { lat: 44.81, lon: 20.46 };
+
+/** Tačka `eastKm` istočno i `northKm` severno od centra Beograda (ravna aproksimacija, dovoljna za ~15 km). */
+function nearBeograd(eastKm: number, northKm: number): { lat: number; lon: number } {
+  const kmPerLat = 111.2;
+  const kmPerLon = kmPerLat * Math.cos((BEOGRAD_CENTRE.lat * Math.PI) / 180);
+  return { lat: Math.round((BEOGRAD_CENTRE.lat + northKm / kmPerLat) * 1e4) / 1e4, lon: Math.round((BEOGRAD_CENTRE.lon + eastKm / kmPerLon) * 1e4) / 1e4 };
+}
+
+interface BeogradSite {
+  municipality: string;
+  /** Položaj kao pomak od centra u km (istok, sever) – vidi `nearBeograd`. */
+  east: number;
+  north: number;
+  profile: Partial<Profile>;
+  lagHours?: number;
+}
+
 /**
- * „Demo – Beograd“: devet izmišljenih stanica gradskih opština u krugu od 12 km (centar grada
- * ≈ 44,81 N 20,46 E), umesto dve podrazumevane. Profili su namerno raznoliki (kotlina Rakovice
- * sa grejanjem, saobraćaj Vračara, industrija uz Dunav, zelena Zvezdara), pa su kategorije
- * mešovite – provera razmaka markera na mapi kad se stanice gužvaju.
+ * „Demo – Beograd“: 33 izmišljene stanice gradskih opština umesto dve podrazumevane, raspoređene
+ * kao prava gradska mreža – osam u gustom centru (≤ 4,5 km, međusobno ≥ 2,2 km) i 25 u prstenu
+ * od 4,5 do ~14 km (međusobno ≥ 3 km). Na celoj mapi Srbije tačke bi se morale razmaći za
+ * desetine km, pa ih mapa prikazuje kao jednu grupu „Grad Beograd · 33“; uvećan okrug ih razdvaja
+ * sa pomakom ispod 2 km. Profili su namerno raznoliki (grejanje u Rakovici i Kaluđerici, saobraćaj
+ * Vračara, čist Padinska Skela), pa su kategorije mešovite, uveče i noću sa nekoliko „Zagađen“.
  */
-const BEOGRAD_CLUSTER: ReadonlyArray<{ municipality: string; lat: number; lon: number; profile: Partial<Profile>; lagHours?: number }> = [
-  { municipality: 'Stari grad', lat: 44.8186, lon: 20.4578, profile: { pm: 1.3, no2: 1.9, so2: 0.9 } },
-  { municipality: 'Novi Beograd', lat: 44.8065, lon: 20.395, profile: { pm: 1.05, no2: 1.9, so2: 0.8, o3: 0.9 } },
-  { municipality: 'Zemun', lat: 44.8458, lon: 20.401, profile: { pm: 0.9, no2: 1.4 } },
-  { municipality: 'Vračar', lat: 44.7975, lon: 20.472, profile: { pm: 1.15, no2: 2.3, so2: 0.9 } },
-  { municipality: 'Voždovac', lat: 44.772, lon: 20.483, profile: { pm: 1.0, no2: 1.5 } },
-  { municipality: 'Čukarica', lat: 44.77, lon: 20.42, profile: { pm: 1.6, no2: 1.3 } },
-  { municipality: 'Rakovica', lat: 44.745, lon: 20.447, profile: { pm: 2.9, no2: 1.1 } },
-  { municipality: 'Savski venac', lat: 44.7905, lon: 20.4505, profile: { pm: 0.75, no2: 1.6, so2: 1.6 }, lagHours: 3 },
-  { municipality: 'Zvezdara', lat: 44.79, lon: 20.51, profile: { pm: 0.5, no2: 0.9, o3: 1.15 } },
+const BEOGRAD_CLUSTER: readonly BeogradSite[] = [
+  // Gust centar. (Opštine samo iz `opstine-okrug.json` → „Grad Beograd“; „Palilula“ tamo znači niški okrug.)
+  { municipality: 'Stari grad', east: 0, north: 0, profile: { pm: 1.3, no2: 1.9, so2: 0.9 } },
+  { municipality: 'Beograd', east: 2.4, north: 0.8, profile: { pm: 1.5, no2: 1.6 } },
+  { municipality: 'Vračar', east: 1.3, north: -2.2, profile: { pm: 1.15, no2: 2.3, so2: 0.9 } },
+  { municipality: 'Savski venac', east: -1.3, north: -2.2, profile: { pm: 0.75, no2: 1.6, so2: 1.6 }, lagHours: 3 },
+  { municipality: 'Novi Beograd', east: -2.6, north: 0.6, profile: { pm: 1.05, no2: 1.9, so2: 0.8, o3: 0.9 } },
+  { municipality: 'Zemun', east: -1.0, north: 2.4, profile: { pm: 0.9, no2: 1.4 } },
+  { municipality: 'Beograd', east: 1.2, north: 3.0, profile: { pm: 1.7, no2: 1.2 } },
+  { municipality: 'Zvezdara', east: 3.8, north: -1.6, profile: { pm: 0.5, no2: 0.9, o3: 1.15 } },
+  // Prsten 4,5–14 km.
+  { municipality: 'Zvezdara', east: 6.0, north: 0.5, profile: { pm: 1.2, no2: 1.0 } },
+  { municipality: 'Beograd', east: 5.5, north: 4.0, profile: { pm: 1.0, no2: 0.8 } },
+  { municipality: 'Borča', east: 2.5, north: 6.0, profile: { pm: 2.2, no2: 0.7 } },
+  { municipality: 'Zemun', east: -1.5, north: 6.0, profile: { pm: 1.4 } },
+  { municipality: 'Zemun', east: -5.0, north: 4.5, profile: { pm: 1.1, no2: 1.1 } },
+  { municipality: 'Novi Beograd', east: -6.0, north: 1.0, profile: { pm: 0.9, no2: 1.5 } },
+  { municipality: 'Surčin', east: -9.0, north: -1.0, profile: { pm: 0.7, no2: 0.6, o3: 1.1 } },
+  { municipality: 'Čukarica', east: -3.5, north: -5.0, profile: { pm: 1.6, no2: 1.3 } },
+  { municipality: 'Voždovac', east: 0.5, north: -5.5, profile: { pm: 1.0, no2: 1.5 } },
+  { municipality: 'Voždovac', east: 3.8, north: -5.2, profile: { pm: 2.6, no2: 0.9 } },
+  { municipality: 'Zvezdara', east: 6.5, north: -4.0, profile: { pm: 1.3 } },
+  { municipality: 'Grocka', east: 9.0, north: -1.0, profile: { pm: 2.9, no2: 1.1 } },
+  { municipality: 'Beograd', east: 9.5, north: 3.5, profile: { pm: 0.6, o3: 1.1 } },
+  { municipality: 'Borča', east: 7.0, north: 7.5, profile: { pm: 1.8, so2: 1.2 } },
+  { municipality: 'Borča', east: 0, north: 10.5, profile: { pm: 0.55, no2: 0.5, o3: 1.2 } },
+  { municipality: 'Zemun', east: -7.0, north: 9.5, profile: { pm: 1.2, no2: 0.9 } },
+  { municipality: 'Zemun', east: -10.5, north: 4.0, profile: { pm: 0.65, o3: 1.05 } },
+  { municipality: 'Surčin', east: -13.0, north: -4.0, profile: { pm: 0.5, no2: 0.5, o3: 1.1 } },
+  { municipality: 'Čukarica', east: -8.0, north: -7.0, profile: { pm: 1.9, so2: 1.4 } },
+  { municipality: 'Rakovica', east: -2.5, north: -8.5, profile: { pm: 2.9, no2: 1.1 } },
+  { municipality: 'Voždovac', east: 2.0, north: -10.0, profile: { pm: 1.1 } },
+  { municipality: 'Voždovac', east: 6.5, north: -9.0, profile: { pm: 0.8 } },
+  { municipality: 'Grocka', east: 12.0, north: -6.0, profile: { pm: 1.0, so2: 1.8 } },
+  { municipality: 'Grocka', east: 13.5, north: 1.5, profile: { pm: 3.1, no2: 0.8 } },
+  { municipality: 'Borča', east: 11.0, north: 9.0, profile: { pm: 0.45, no2: 0.4, o3: 1.15 } },
 ];
 
 /** Satni oblik dana po parametru (indeks = lokalni sat). */
@@ -225,17 +274,18 @@ export function buildSpecs(scenario: DemoScenario = 'default'): DemoStationSpec[
     const [lon, lat] = feature.properties.centroid ?? [20.5, 44];
     const profile = { pm: 1, no2: 1, so2: 1, o3: 1, ...PROFILES[town] };
     if (town === 'Beograd' && scenario === 'beograd') {
-      // „Demo – Beograd“: klaster od devet stanica umesto dve podrazumevane.
+      // „Demo – Beograd“: 33 stanice gradske mreže umesto dve podrazumevane.
       BEOGRAD_CLUSTER.forEach((site, i) => {
         index++;
+        const { lat: siteLat, lon: siteLon } = nearBeograd(site.east, site.north);
         specs.push({
           sepaId: 9000 + index,
           id: `demo-station-${9000 + index}`,
           name: `Demo stanica Beograd ${i + 1}`,
           code: `DEMO-${String(index).padStart(3, '0')}`,
           municipality: site.municipality,
-          lat: site.lat,
-          lon: site.lon,
+          lat: siteLat,
+          lon: siteLon,
           profile: { pm: 1, no2: 1, so2: 1, o3: 1, ...site.profile },
           parameters: [...PARAMETERS],
           lagHours: site.lagHours ?? 1,
@@ -465,7 +515,7 @@ export function dailyStatsForStation(spec: DemoStationSpec, now: Date, scenario:
   }));
 }
 
-/** Dnevnik sinhronizacija; `stationCount` je broj stanica demo mreže (26, u scenariju `beograd` 33). */
+/** Dnevnik sinhronizacija; `stationCount` je broj stanica demo mreže (26, u scenariju `beograd` 57). */
 export function buildDemoSyncRuns(now: Date, stationCount = 26): SyncRunRecord[] {
   const minute = 60_000;
   const t = now.getTime();

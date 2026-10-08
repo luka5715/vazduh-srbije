@@ -5,7 +5,10 @@
  * neispravan link, moja stanica, „Kako čitati“, pokrivenost istorije, ?demo=late; traka izabrane
  * stanice iznad donje navigacije (390×664), kartice „+N stanica“ na telefonu, naslov heroja sa dva
  * stanja na dvomodalan dan, prvi prikaz KPI brojeva bez odbrojavanja, traka „Uživo“ kao jedan
- * tab-stop, plutajuće obaveštenje iznad trake izabrane stanice.
+ * tab-stop, plutajuće obaveštenje iznad trake izabrane stanice; ?demo=beograd: grupa stanica
+ * „Grad Beograd · 33“ na celoj mapi, dodir/Enter je otvara kao uvećan okrug (33 tačke, mreža na
+ * 0,5°, razmernik 20 km), „Ukloni filter“ vraća grupu, kompaktna mapa Pregleda ima istu grupu, na
+ * telefonu 390×664 dodir na grupu pa na tačku i dalje daje traku izabrane stanice iznad navigacije.
  *
  * Upotreba:  node scripts/e2e.mjs <distDir> <outDir>
  *   distDir – gotov demo build (npr. dist-demo posle `npm run build:demo`)
@@ -648,6 +651,158 @@ const hashParams = (page) => new URLSearchParams(new URL(page.url()).hash.split(
   await page.waitForTimeout(600);
   const unimodal = await readHero();
   check('Pregled: jednomodalan dan ostaje jedno stanje („uglavnom umeren“)', /^Vazduh je uglavnom umeren$/.test(unimodal.h1) && unimodal.h1 === expectedHeadline(unimodal.counts), `„${unimodal.h1}“ · stanice ${unimodal.counts.join('/')}`);
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------- demo scenario: Beograd (?demo=beograd) – grupa stanica i uvećan okrug
+{
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: 'dark', locale: 'sr-Latn-RS', timezoneId: 'Europe/Belgrade' });
+  const page = await ctx.newPage();
+  watch(page, 'beograd');
+  await page.goto(`${base}?demo=beograd#/?view=mapa`);
+  await ready(page, 'mapa');
+  await page.waitForSelector('[data-testid="serbia-map"] svg path');
+  await page.waitForTimeout(800);
+  const map = page.locator('[data-testid="serbia-map"]');
+  const clusters = map.locator('button.mk--cluster');
+  const clusterName = (await clusters.count()) ? await clusters.first().getAttribute('aria-label') : '';
+  const notesBefore = await map.locator('[data-testid="map-notes"]').innerText();
+  const areaBefore = await map.locator('.smap__area').innerText();
+  const stationsBefore = await map.locator('button.mk:not(.mk--cluster)').count();
+  check(
+    '?demo=beograd Mapa: jedna grupa „Grad Beograd · 33 stanice“, red i napomena u legendi, razmernik 50 km',
+    (await clusters.count()) === 1 && /^Grad Beograd · 33 stanice · .* — dodir otvara okrug$/.test(clusterName) && /Gust okrug \(Grad Beograd · 33\) je prikazan kao grupa stanica/.test(notesBefore) && (await map.locator('[data-testid="cluster-key"]').count()) === 1 && /50 km/.test(areaBefore) && stationsBefore === 24,
+    `grupa „${clusterName}“, pojedinačnih tačaka ${stationsBefore}`,
+  );
+  await page.screenshot({ path: join(outDir, 'beograd-mapa-grupa.png') });
+
+  await clusters.first().click();
+  await page.waitForTimeout(900);
+  /** Dugmad oznaka u okviru mape: sva, cela unutar okvira, beogradska (neprigušena), grupe. */
+  const zoomState = () =>
+    map.evaluate((root) => {
+      const area = root.querySelector('.smap__area');
+      const a = area.getBoundingClientRect();
+      const buttons = [...root.querySelectorAll('button.mk:not(.mk--cluster)')];
+      const inside = buttons.filter((b) => {
+        const r = b.getBoundingClientRect();
+        return r.left >= a.left - 1 && r.right <= a.right + 1 && r.top >= a.top - 1 && r.bottom <= a.bottom + 1;
+      }).length;
+      const own = buttons.filter((b) => /^Demo stanica Beograd \d+,/.test(b.getAttribute('aria-label') ?? '') && !b.hasAttribute('data-dim')).length;
+      return {
+        buttons: buttons.length,
+        inside,
+        own,
+        clusters: root.querySelectorAll('button.mk--cluster').length,
+        area: area.innerText,
+        legend: root.querySelector('.smap__legend')?.innerText ?? '',
+        vb: root.querySelector('svg.smap__land')?.getAttribute('viewBox') ?? '',
+        clipped: getComputedStyle(area).overflow === 'hidden',
+      };
+    });
+  const zoomed = await zoomState();
+  const okrugParam = hashParams(page).get('okrug');
+  const panelText = await page.locator('[data-testid="view-mapa"]').innerText();
+  check(
+    '?demo=beograd Mapa: dodir na grupu otvara okrug – ?okrug=Grad Beograd, bez grupe, 33 beogradske tačke cele u okviru, mreža „44,5°N“, razmernik 20 km, legenda prati okrug',
+    okrugParam === 'Grad Beograd' && zoomed.clusters === 0 && zoomed.own === 33 && zoomed.inside === zoomed.buttons && zoomed.buttons >= 33 && zoomed.clipped && /44,5°N/.test(zoomed.area) && /\b20 km\b/.test(zoomed.area) && !/50 km/.test(zoomed.area) && /van okruga \(prigušeno\)/.test(zoomed.legend) && /Grad Beograd/.test(panelText),
+    `okrug=${okrugParam}, dugmadi ${zoomed.buttons} (u okviru ${zoomed.inside}, beogradskih ${zoomed.own}), viewBox ${zoomed.vb}`,
+  );
+  await page.screenshot({ path: join(outDir, 'beograd-mapa-okrug.png') });
+
+  // Ponovo cela mreža: čip „Ukloni filter“ u gornjoj traci vraća grupu i razmernik od 50 km.
+  await page.locator('header').getByRole('button', { name: /Ukloni filter/ }).click();
+  await page.waitForTimeout(900);
+  const reset = await zoomState();
+  check('?demo=beograd Mapa: „Ukloni filter“ vraća celu mapu (50 km, bez sečenja) i grupu', !hashParams(page).get('okrug') && reset.clusters === 1 && /50 km/.test(reset.area) && !reset.clipped && reset.buttons === 24, `dugmadi ${reset.buttons}, grupa ${reset.clusters}`);
+
+  // Tastatura: Enter na grupi otvara okrug, a fokus prelazi na prvu stanicu u okviru (ne ispada iz mape).
+  await clusters.first().focus();
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(900);
+  const focused = await page.evaluate(() => ({ cls: document.activeElement?.className ?? '', label: document.activeElement?.getAttribute('aria-label') ?? '' }));
+  check(
+    '?demo=beograd Mapa: Enter na grupi otvara okrug i fokus prelazi na prvu stanicu u okviru',
+    hashParams(page).get('okrug') === 'Grad Beograd' && /(^|\s)mk(\s|$)/.test(focused.cls) && !/mk--cluster/.test(focused.cls) && /^Demo stanica/.test(focused.label),
+    `fokus „${focused.label.slice(0, 60)}“`,
+  );
+
+  // Pregled: kompaktna mapa ima istu grupu, a dodir na nju filtrira celu stranicu po okrugu.
+  await page.goto(`${base}?demo=beograd#/?view=pregled`);
+  await ready(page, 'pregled');
+  await page.waitForTimeout(900);
+  const preview = page.locator('.smap--compact button.mk--cluster');
+  const previewCount = await preview.count();
+  await page.screenshot({ path: join(outDir, 'beograd-pregled-grupa.png') });
+  if (previewCount) await preview.first().click();
+  await page.waitForTimeout(900);
+  const previewZoom = await page.evaluate(() => ({
+    clusters: document.querySelectorAll('.smap--compact button.mk--cluster').length,
+    own: [...document.querySelectorAll('.smap--compact button.mk')].filter((b) => !b.hasAttribute('data-dim')).length,
+    filter: /aktivan filter/i.test(document.querySelector('[data-testid="view-pregled"]')?.innerText ?? ''),
+  }));
+  check(
+    '?demo=beograd Pregled: kompaktna mapa ima grupu „Grad Beograd · 33“; dodir filtrira stranicu po okrugu i uvećava mapu (33 tačke)',
+    previewCount === 1 && hashParams(page).get('okrug') === 'Grad Beograd' && previewZoom.clusters === 0 && previewZoom.own === 33 && previewZoom.filter === true,
+    `grupa ${previewCount}, posle dodira: grupa ${previewZoom.clusters}, tačaka ${previewZoom.own}`,
+  );
+  await page.screenshot({ path: join(outDir, 'beograd-pregled-okrug.png') });
+  await ctx.close();
+}
+
+// ---------------------------------------------------------------- telefon 390×664 + ?demo=beograd: dodir na grupu, pa na tačku (traka izabrane stanice)
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 664 }, isMobile: true, hasTouch: true, colorScheme: 'dark', locale: 'sr-Latn-RS', timezoneId: 'Europe/Belgrade' });
+  const page = await ctx.newPage();
+  watch(page, 'beograd-phone');
+  await page.goto(`${base}?demo=beograd#/?view=mapa`);
+  await ready(page, 'mapa');
+  await page.waitForSelector('[data-testid="serbia-map"] svg path');
+  await page.waitForTimeout(800);
+  const map = page.locator('[data-testid="serbia-map"]');
+  const tapOn = async (locator) => {
+    try {
+      await locator.tap({ timeout: 5000 });
+    } catch {
+      await locator.scrollIntoViewIfNeeded();
+      const box = await locator.boundingBox();
+      await page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+    }
+  };
+  const cluster = map.locator('button.mk--cluster').first();
+  const clusterBox = await cluster.boundingBox();
+  await tapOn(cluster);
+  await page.waitForTimeout(900);
+  const phoneZoom = await page.evaluate(() => ({
+    sw: document.documentElement.scrollWidth,
+    cw: document.documentElement.clientWidth,
+    clusters: document.querySelectorAll('[data-testid="serbia-map"] button.mk--cluster').length,
+    own: [...document.querySelectorAll('[data-testid="serbia-map"] button.mk')].filter((b) => /^Demo stanica Beograd \d+,/.test(b.getAttribute('aria-label') ?? '') && !b.hasAttribute('data-dim')).length,
+  }));
+  check(
+    '390×664 ?demo=beograd: dodir na grupu (dugme ≥ 32 px) uvećava okrug – 33 beogradske tačke, bez vodoravnog skrola',
+    Boolean(clusterBox && clusterBox.width >= 32 && clusterBox.height >= 32) && hashParams(page).get('okrug') === 'Grad Beograd' && phoneZoom.clusters === 0 && phoneZoom.own === 33 && phoneZoom.sw <= phoneZoom.cw,
+    `dugme grupe ${clusterBox ? `${Math.round(clusterBox.width)}×${Math.round(clusterBox.height)}` : '–'}, tačaka ${phoneZoom.own}, scrollWidth ${phoneZoom.sw}/${phoneZoom.cw}`,
+  );
+  await page.screenshot({ path: join(outDir, 'phone-664-beograd-okrug.png') });
+
+  // Pravilo iz prethodne runde važi i na uvećanom okrugu: dodir na tačku → traka cela vidljiva iznad donje
+  // navigacije (ćelije od 28 px susednih tačaka se preklapaju, pa dodir sme da pogodi i susednu beogradsku stanicu).
+  await tapOn(page.locator('button.mk[aria-label^="Demo stanica Beograd 1,"]').first());
+  await page.waitForTimeout(700);
+  const strip = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="selected-strip"]');
+    const nav = [...document.querySelectorAll('nav[aria-label="Stranice"]')].pop();
+    const r = (node) => (node ? (({ top, bottom, left, right }) => ({ top: Math.round(top), bottom: Math.round(bottom), left: Math.round(left), right: Math.round(right) }))(node.getBoundingClientRect()) : null);
+    return { strip: r(el), placement: el?.dataset.placement ?? null, name: el?.querySelector('p')?.textContent ?? '', nav: nav && getComputedStyle(nav).display !== 'none' ? r(nav) : null, vh: window.innerHeight, vw: window.innerWidth };
+  });
+  const s = strip.strip;
+  check(
+    '390×664 ?demo=beograd: posle dodira na tačku uvećanog okruga traka izabrane stanice lebdi cela vidljiva iznad donje navigacije',
+    Boolean(s && strip.placement === 'fixed' && /Demo stanica Beograd \d+/.test(strip.name) && s.top >= 0 && s.bottom <= strip.vh && s.left >= 0 && s.right <= strip.vw && strip.nav && s.bottom <= strip.nav.top),
+    `strip=${JSON.stringify(s)} nav.top=${strip.nav?.top} „${strip.name}“`,
+  );
+  await page.screenshot({ path: join(outDir, 'phone-664-beograd-strip.png') });
   await ctx.close();
 }
 
