@@ -142,6 +142,26 @@ describe('SerbiaMap – grupe stanica i uvećan okrug (?demo=beograd)', () => {
     expect(container.querySelector('svg.smap__land')!.getAttribute('aria-label')).toContain('uvećan i istaknut Grad Beograd');
   });
 
+  it('natpis izabrane stanice na uvećanom okrugu: izmeren pa postavljen (strana, poravnanje, odmak), ne hvata pokazivač', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 343, height: 500, top: 0, left: 0, right: 343, bottom: 500, x: 0, y: 0, toJSON: () => ({}) } as DOMRect);
+    const member = beogradViews.find((view) => view.station.name === 'Demo stanica Beograd 33')!;
+    const { container } = render(<SerbiaMap views={beogradViews} okrug="Grad Beograd" selectedId={member.id} onSelect={vi.fn()} />);
+    const label = screen.getByTestId('selected-label');
+    expect(label).toHaveTextContent('Demo stanica Beograd 33');
+    expect(['right', 'left', 'above', 'below']).toContain(label.getAttribute('data-side'));
+    expect(['center', 'start', 'end']).toContain(label.getAttribute('data-align'));
+    expect(label.getAttribute('data-distance')).toMatch(/^\d+$/);
+    expect(label.style.visibility).not.toBe('hidden');
+    expect(label.style.left).toMatch(/px$/);
+    expect(label.style.top).toMatch(/px$/);
+    expect(label.className).toContain('pointer-events-none');
+    // Spojnica postoji samo kad je natpis odmaknut.
+    expect(container.querySelectorAll('[data-testid="selected-leader"]')).toHaveLength(label.getAttribute('data-distance') === '0' ? 0 : 1);
+    // Kompaktna mapa nema natpis.
+    const compact = render(<SerbiaMap views={beogradViews} okrug="Grad Beograd" selectedId={member.id} compact />);
+    expect(compact.container.querySelector('[data-testid="selected-label"]')).toBeNull();
+  });
+
   it('podrazumevani demo (bez gustog okruga): nema grupe ni reda u legendi, okvir cele zemlje', () => {
     const { container } = render(<SerbiaMap views={views} />);
     expect(container.querySelector('button.mk--cluster')).toBeNull();

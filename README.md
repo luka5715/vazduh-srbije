@@ -83,7 +83,7 @@ prikazuje poruku o tome, a ne tiho neku drugu stanicu.
   okruzima (uz broj stanica u medijani).
 - **Mapa** – ručno crtan SVG Srbije sa granicama okruga; markeri u boji kategorije kroz sočivo; stanice
   bez koordinata stoje u centru svog okruga sa oznakom „približna lokacija“. Markeri koji bi se
-  preklopili (Niš, Bor) razmiču se na ekranu tek koliko tačka zahteva (12 px + 2 px razmaka);
+  preklopili (npr. dve stanice istog grada) razmiču se na ekranu tek koliko tačka zahteva (12 px + 2 px razmaka);
   legenda tada kaže „Preklopljene stanice su razmaknute (do N km)“, a tooltip pomerene stanice koliko
   je pomerena. Gust okrug (bar tri stanice koje bi se morale razmaći više od 5 km – Beograd sa 33 stanice)
   je na celoj mapi **grupa stanica**: disk sa brojem i prstenom udela kategorija; dodir na grupu

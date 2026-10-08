@@ -499,3 +499,184 @@ export function neighborInDirection(markers: ReadonlyArray<Pick<MapMark, 'id' | 
   }
   return null;
 }
+
+/** Strana natpisa izabrane stanice prema njenoj oznaci (tački ili grupi koja je sadrži). */
+export type LabelSide = 'right' | 'left' | 'above' | 'below';
+/** Poravnanje natpisa duž ivice oznake: centriran, počinje uz oznaku (`start`) ili se završava uz nju (`end`). */
+export type LabelAlign = 'center' | 'start' | 'end';
+
+/** Veličina natpisa u px (prirodna, bez skraćivanja imena). */
+export interface LabelSize {
+  width: number;
+  height: number;
+}
+
+/** Okvir mape za natpis: viewBox i izmerena veličina okvira u px. */
+export interface LabelFrame {
+  vb: ViewBox;
+  width: number;
+  height: number;
+}
+
+/** Tačka u px od gornjeg levog ugla okvira. */
+export interface PointPx {
+  x: number;
+  y: number;
+}
+
+export interface LabelPlacement {
+  side: LabelSide;
+  align: LabelAlign;
+  /** Odmak natpisa od oznake preko osnovnog razmaka (px, iz `LABEL_STEPS_PX`); > 0 → spojnica. */
+  distance: number;
+  /** Gornji levi ugao natpisa, px od gornjeg levog ugla okvira. */
+  left: number;
+  top: number;
+  /** Najveća širina natpisa (px): `LABEL_MAX_PX` kad ceo staje u okvir, inače prostor do ivice (ime se skraćuje). */
+  maxWidth: number;
+  /** Ceo natpis (širine najviše `LABEL_MAX_PX`) staje u okvir sa `LABEL_MARGIN_PX` od ivice. */
+  fits: boolean;
+  /** Druge oznake čiji je centar pod natpisom (skrivene) i one koje natpis samo dodiruje. */
+  hidden: number;
+  touched: number;
+  /** Spojnica od centra oznake do ivice natpisa, samo kad je natpis odmaknut (`distance` > 0). */
+  leader: { from: PointPx; to: PointPx } | null;
+}
+
+/** Razmak natpisa od ivice okvira (px). */
+export const LABEL_MARGIN_PX = 2;
+/** Najveća širina natpisa (px); duže ime se skraćuje. */
+export const LABEL_MAX_PX = 260;
+/**
+ * Razmak natpisa od centra oznake (px): izabrana tačka 16 px + prsten akcenta 4 px → poluprečnik 12,
+ * disk grupe 28 px → 14; plus 5 px vazduha.
+ */
+export const LABEL_GAP_PX = { station: 17, cluster: CLUSTER_DISC_PX.full / 2 + 5 } as const;
+/**
+ * Odmaci natpisa od oznake (px) kad uz samu oznaku svaki položaj skriva druge tačke (gust uvećan
+ * okrug): natpis se odmiče najmanje koliko mora, a spojnica ga vezuje za oznaku.
+ */
+export const LABEL_STEPS_PX: readonly number[] = [0, 16, 32, 48];
+/** Poravnan natpis (`start`/`end`) počinje odnosno završava se ovoliko px preko centra oznake. */
+const LABEL_ALIGN_OVERLAP_PX = 10;
+/** Najmanja širina skraćenog natpisa (px), da natpis uz samu ivicu ne nestane. */
+const LABEL_MIN_PX = 48;
+/** Spojnica se vezuje bar ovoliko px od ugla natpisa. */
+const LEADER_INSET_PX = 6;
+
+/** Vidljivi poluprečnik oznake u px (tačka ili disk + beli prsten od 2 px) – prepreka za natpis. */
+export function markRadiusPx(mark: Pick<MapMark, 'type'>, compact = false): number {
+  const size = mark.type === 'cluster' ? CLUSTER_DISC_PX : MARKER_DOT_PX;
+  return (compact ? size.compact : size.full) / 2 + 2;
+}
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), Math.max(min, max));
+
+/**
+ * Položaji natpisa izabrane stanice oko oznake `selected`: strana (desno, levo, iznad, ispod) ×
+ * poravnanje (centriran, počinje uz oznaku, završava se uz nju) × odmak (`LABEL_STEPS_PX`), ocenjeni po
+ * tome koliko DRUGIH oznaka prekrivaju – najbolji je prvi. Redosled ocene: natpis koji ceo staje u
+ * okvir pre onog koji bi izašao (ime bi se skraćivalo); manje skrivenih oznaka (centar pod natpisom);
+ * manji odmak (natpis uz oznaku, bez spojnice); manje dodirnutih (krug oznake seče natpis); pri
+ * jednakoj oceni dosadašnje pravilo – strana sa više mesta (desno u levoj polovini okvira, inače levo),
+ * pa iznad, pa ispod, centriran pre poravnatog. Iznad/ispod se natpis pomera vodoravno koliko treba da
+ * ostane u okviru (oznaka ostaje pod njim), desno/levo uspravno. Na uvećanom gustom okrugu tačke stoje
+ * na 14 px, pa natpis uz oznaku skoro uvek pređe preko nekih – zato se bira ocenom, a po potrebi odmiče
+ * (33 beogradske stanice: na svakom okviru postoji položaj koji ne skriva nijednu tačku, odmak ≤ 32 px).
+ * Prepreke su i diskovi grupa (na celoj mapi natpis grupe ne sme preko susedne grupe). Čista funkcija u px.
+ */
+export function labelCandidates(
+  marks: ReadonlyArray<Pick<MapMark, 'id' | 'type' | 'x' | 'y'>>,
+  selected: Pick<MapMark, 'id' | 'x' | 'y'>,
+  frame: LabelFrame,
+  label: LabelSize,
+  gapPx: number,
+  compact = false,
+): LabelPlacement[] {
+  const toPx = (mark: Pick<MapMark, 'x' | 'y'>): PointPx => ({
+    x: ((mark.x - frame.vb.x) / frame.vb.w) * frame.width,
+    y: ((mark.y - frame.vb.y) / frame.vb.h) * frame.height,
+  });
+  const anchor = toPx(selected);
+  const obstacles = marks.filter((mark) => mark.id !== selected.id).map((mark) => ({ ...toPx(mark), radius: markRadiusPx(mark, compact) }));
+  const margin = LABEL_MARGIN_PX;
+  const w = Math.min(label.width, LABEL_MAX_PX);
+  const h = label.height;
+  const leftHalf = anchor.x <= frame.width / 2;
+  const sides: readonly LabelSide[] = leftHalf ? ['right', 'left', 'above', 'below'] : ['left', 'right', 'above', 'below'];
+  const aligns: readonly LabelAlign[] = leftHalf ? ['center', 'start', 'end'] : ['center', 'end', 'start'];
+  /** Položaj natpisa duž ivice oznake (`size` = njegova dužina na toj osi, `at` = centar oznake). */
+  const along = (align: LabelAlign, size: number, at: number) =>
+    align === 'center' ? at - size / 2 : align === 'start' ? at - LABEL_ALIGN_OVERLAP_PX : at + LABEL_ALIGN_OVERLAP_PX - size;
+
+  const ranked: Array<{ placement: LabelPlacement; rank: number }> = [];
+  for (const distance of LABEL_STEPS_PX) {
+    const gap = gapPx + distance;
+    sides.forEach((side, sideIndex) => {
+      aligns.forEach((align, alignIndex) => {
+        const horizontal = side === 'right' || side === 'left';
+        let left: number;
+        let top: number;
+        /** Prostor za natpis na toj strani (px) – širina kad se skraćuje. */
+        let room: number;
+        if (horizontal) {
+          left = side === 'right' ? anchor.x + gap : anchor.x - gap - w;
+          top = clamp(along(align, h, anchor.y), margin, frame.height - margin - h);
+          room = side === 'right' ? frame.width - margin - left : anchor.x - gap - margin;
+        } else {
+          left = clamp(along(align, w, anchor.x), margin, frame.width - margin - w);
+          top = side === 'above' ? anchor.y - gap - h : anchor.y + gap;
+          room = frame.width - 2 * margin;
+        }
+        const fits = left >= margin && left + w <= frame.width - margin && top >= margin && top + h <= frame.height - margin;
+        let hidden = 0;
+        let touched = 0;
+        for (const obstacle of obstacles) {
+          if (obstacle.x > left && obstacle.x < left + w && obstacle.y > top && obstacle.y < top + h) {
+            hidden++;
+            continue;
+          }
+          const dx = Math.max(left - obstacle.x, 0, obstacle.x - (left + w));
+          const dy = Math.max(top - obstacle.y, 0, obstacle.y - (top + h));
+          if (dx * dx + dy * dy < obstacle.radius * obstacle.radius) touched++;
+        }
+        const leader =
+          distance > 0
+            ? {
+                from: anchor,
+                to: horizontal
+                  ? { x: side === 'right' ? left : left + w, y: clamp(anchor.y, top + LEADER_INSET_PX, top + h - LEADER_INSET_PX) }
+                  : { x: clamp(anchor.x, left + LEADER_INSET_PX, left + w - LEADER_INSET_PX), y: side === 'above' ? top + h : top },
+              }
+            : null;
+        ranked.push({
+          // Natpis koji ne staje se skraćuje do ivice okvira (levo/iznad/ispod počinje od ivice).
+          placement: { side, align, distance, left: fits || side === 'right' ? left : Math.max(left, margin), top, maxWidth: fits ? LABEL_MAX_PX : Math.max(room, LABEL_MIN_PX), fits, hidden, touched, leader },
+          rank: sideIndex * aligns.length + alignIndex,
+        });
+      });
+    });
+  }
+  return ranked
+    .sort(
+      (a, b) =>
+        Number(!a.placement.fits) - Number(!b.placement.fits) ||
+        a.placement.hidden - b.placement.hidden ||
+        a.placement.distance - b.placement.distance ||
+        a.placement.touched - b.placement.touched ||
+        a.rank - b.rank,
+    )
+    .map((entry) => entry.placement);
+}
+
+/** Najbolji položaj natpisa izabrane stanice (prvi iz `labelCandidates`). */
+export function labelPlacement(
+  marks: ReadonlyArray<Pick<MapMark, 'id' | 'type' | 'x' | 'y'>>,
+  selected: Pick<MapMark, 'id' | 'x' | 'y'>,
+  frame: LabelFrame,
+  label: LabelSize,
+  gapPx: number,
+  compact = false,
+): LabelPlacement {
+  return labelCandidates(marks, selected, frame, label, gapPx, compact)[0];
+}

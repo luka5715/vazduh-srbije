@@ -184,8 +184,8 @@ Fajlovi: `src/lib/` (insights.ts, stations.ts, syncRules.ts, coverage.ts, format
    preuzimanja („Osveženo pre …“ – K6). Stanica bez merenja duže od 6 h ne ulazi u stanje mreže, a
    uspešna sinhronizacija bez novih sati prikazuje se kao „SEPA kasni“, ne kao sveži podaci.
 6. **Koordinate.** Kada ih API ne daje, lokacija na mapi je centar okruga opštine (oznaka „približna
-   lokacija“), a ne stvarna lokacija stanice. Markeri koji bi se na ekranu preklopili (Beograd, Niš)
-   razmaknuti su tek koliko tačka zahteva (12 px + 2 px); legenda tada kaže „Preklopljene stanice su
+   lokacija“), a ne stvarna lokacija stanice. Markeri koji bi se na ekranu preklopili (npr. dve stanice
+   istog grada) razmaknuti su tek koliko tačka zahteva (12 px + 2 px); legenda tada kaže „Preklopljene stanice su
    razmaknute (do N km)“, a tooltip pomerene stanice koliko je pomerena – položaj takve tačke nije
    geografski tačan. Gust okrug (bar tri stanice koje bi se na celoj mapi morale razmaći više od 5 km,
    npr. Beograd) prikazan je kao jedna grupa u težištu svojih stanica – ni to nije položaj stanice; dodir

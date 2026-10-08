@@ -139,7 +139,9 @@ interface BeogradSite {
 /**
  * „Demo – Beograd“: 33 izmišljene stanice gradskih opština umesto dve podrazumevane, raspoređene
  * kao prava gradska mreža – osam u gustom centru (≤ 4,5 km, međusobno ≥ 2,2 km) i 25 u prstenu
- * od 4,5 do ~14 km (međusobno ≥ 3 km). Na celoj mapi Srbije tačke bi se morale razmaći za
+ * od 4,5 do ~14 km (međusobno ≥ 3 km), sve bar 1,5 km unutar granice Grada Beograda iz `okruzi.json`
+ * (razmicanje na uvećanom okrugu pomera tačku do ~2 km, pa stanica uz samu granicu izgleda kao da je
+ * u susednom okrugu). Na celoj mapi Srbije tačke bi se morale razmaći za
  * desetine km, pa ih mapa prikazuje kao jednu grupu „Grad Beograd · 33“; uvećan okrug ih razdvaja
  * sa pomakom ispod 2 km. Profili su namerno raznoliki (grejanje u Rakovici i Kaluđerici, saobraćaj
  * Vračara, čist Padinska Skela), pa su kategorije mešovite, uveče i noću sa nekoliko „Zagađen“.
@@ -178,8 +180,8 @@ const BEOGRAD_CLUSTER: readonly BeogradSite[] = [
   { municipality: 'Voždovac', east: 2.0, north: -10.0, profile: { pm: 1.1 } },
   { municipality: 'Voždovac', east: 6.5, north: -9.0, profile: { pm: 0.8 } },
   { municipality: 'Grocka', east: 12.0, north: -6.0, profile: { pm: 1.0, so2: 1.8 } },
-  { municipality: 'Grocka', east: 13.5, north: 1.5, profile: { pm: 3.1, no2: 0.8 } },
-  { municipality: 'Borča', east: 11.0, north: 9.0, profile: { pm: 0.45, no2: 0.4, o3: 1.15 } },
+  { municipality: 'Grocka', east: 11.5, north: 1.0, profile: { pm: 3.1, no2: 0.8 } },
+  { municipality: 'Borča', east: 4.0, north: 10.0, profile: { pm: 0.45, no2: 0.4, o3: 1.15 } },
 ];
 
 /** Satni oblik dana po parametru (indeks = lokalni sat). */

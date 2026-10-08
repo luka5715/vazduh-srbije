@@ -95,7 +95,7 @@ export function MapPreview({ className, style }: { className?: string; style?: C
                 {stationsNoun(activeViews(filteredViews).length)}
               </p>
               {selected ? <OkrugStats entry={selected} /> : null}
-              <p className="text-xs leading-5 text-muted">Ostali okruzi su prigušeni; KPI, ritam i rang-lista prikazuju samo ovaj okrug.</p>
+              <p className="text-xs leading-5 text-muted">Mapa je uvećana na okrug (susedi prigušeni); KPI, ritam i rang-lista prikazuju samo ovaj okrug.</p>
               <button
                 type="button"
                 onClick={() => setOkrug(null)}

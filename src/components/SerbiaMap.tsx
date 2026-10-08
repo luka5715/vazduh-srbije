@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 
 import { PARAMETER_LABELS, UNIT } from '@shared/aqi';
 
@@ -8,6 +8,9 @@ import {
   buildMarks,
   CLUSTER_DISC_PX,
   clusterNote,
+  LABEL_GAP_PX,
+  LABEL_MAX_PX,
+  labelPlacement,
   MARKER_DOT_PX,
   markerColor,
   markerSpacing,
@@ -15,6 +18,8 @@ import {
   neighborInDirection,
   spacingNote,
   summarizeMarkers,
+  type LabelFrame,
+  type LabelSize,
   type MapCluster,
   type MapMark,
   type MapMarker,
@@ -78,6 +83,11 @@ export interface SerbiaMapProps {
 
 const ARROWS: Record<string, NavDirection> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
 
+/** Prva oznaka za fokus: prva neprigušena (na uvećanom okrugu najsevernija u okviru može biti sused), inače prva. */
+function firstMarkId(marks: ReadonlyArray<MapMark>): string | null {
+  return (marks.find((mark) => !mark.dimmed) ?? marks[0])?.id ?? null;
+}
+
 /**
  * Poluprečnik kruga izmaglice (viewBox jedinice ≈ 0,58 km): ISTI za sve kategorije – veći krug
  * za lošiju kategoriju bi izgledao kao veće zagađeno područje, a merenje je samo u tački.
@@ -110,7 +120,9 @@ export const HAZE_CAPTION = 'Izmaglica je ilustracija oko stanica – nije meren
  * `onOkrug`, a mapa se uveća na okrug (`districtBounds` → `mapFrame`), gde se tačke razmiču za
  * ≤ 1–2 km i grupe nema. Oznake van uvećanog okvira se ne crtaju; prigušene stanice susednih
  * okruga u okviru ostaju kao kontekst. Izabrana stanica u grupi: grupa nosi prsten akcenta, talase
- * i natpis sa imenom stanice (broj grupe ostaje pošten).
+ * i natpis sa imenom stanice (broj grupe ostaje pošten). Natpis izabrane stanice ide na stranu
+ * (desno/levo/iznad/ispod) na kojoj prekriva najmanje drugih oznaka, a po potrebi se odmakne uz tanku
+ * spojnicu (`labelPlacement`) – u gustom uvećanom okrugu natpis uz tačku bi inače sakrio susedne tačke.
  */
 export function SerbiaMap({
   views,
@@ -173,8 +185,7 @@ export function SerbiaMap({
   const stationCount = marks.reduce((count, mark) => count + (mark.type === 'cluster' ? mark.count : 1), 0);
 
   // Jedan tab-stop za sve oznake (roving tabindex): poslednja fokusirana, izabrana ili prva.
-  const tabbableId =
-    (cursorId && marks.some((mark) => mark.id === cursorId) ? cursorId : null) ?? selected?.id ?? selectedCluster?.id ?? marks[0]?.id ?? null;
+  const tabbableId = (cursorId && marks.some((mark) => mark.id === cursorId) ? cursorId : null) ?? selected?.id ?? selectedCluster?.id ?? firstMarkId(marks);
 
   const setButton = useCallback((id: string, node: HTMLButtonElement | null) => {
     if (node) buttons.current.set(id, node);
@@ -184,8 +195,8 @@ export function SerbiaMap({
   useEffect(() => {
     if (!refocus.current) return;
     refocus.current = false;
-    // Dugme grupe je nestalo dok je bilo fokusirano (fokus je pao na <body>): prva oznaka u okviru.
-    const first = marks[0]?.id;
+    // Dugme grupe je nestalo dok je bilo fokusirano (fokus je pao na <body>): prva stanica okruga u okviru.
+    const first = firstMarkId(marks);
     if (first && document.activeElement === document.body) {
       setCursorId(first);
       buttons.current.get(first)?.focus();
@@ -391,10 +402,20 @@ export function SerbiaMap({
               })}
             </div>
 
-            {/* Ime izabrane stanice uz tačku ili uz grupu koja je sadrži (ne hvata pokazivač – markeri ispod ostaju dostupni). */}
-            {selected && !compact && measured ? <SelectedLabel marker={selected} left={leftPct(selected.x)} top={topPct(selected.y)} lens={lens} /> : null}
+            {/* Ime izabrane stanice uz tačku ili uz grupu koja je sadrži, na strani koja prekriva najmanje drugih oznaka
+                (ne hvata pokazivač – markeri ispod ostaju dostupni). */}
+            {selected && !compact && measured ? (
+              <SelectedLabel marker={selected} anchor={selected} marks={marks} frame={{ vb, width: size.width, height: size.height }} lens={lens} gapPx={LABEL_GAP_PX.station} />
+            ) : null}
             {selectedCluster && selectedMember && !compact && measured ? (
-              <SelectedLabel marker={selectedMember} left={leftPct(selectedCluster.x)} top={topPct(selectedCluster.y)} lens={lens} gapPx={CLUSTER_DISC_PX.full / 2 + 5} />
+              <SelectedLabel
+                marker={selectedMember}
+                anchor={selectedCluster}
+                marks={marks}
+                frame={{ vb, width: size.width, height: size.height }}
+                lens={lens}
+                gapPx={LABEL_GAP_PX.cluster}
+              />
             ) : null}
 
             {hovered && measured && (hovered.id !== selectedId || compact)
@@ -621,27 +642,89 @@ function readingText(marker: MapMarker, lens: Lens): string | null {
   return `${PARAMETER_LABELS[parameter]} ${formatConcentration(value)}`;
 }
 
-/** Natpis izabrane stanice: ime + vrednost kroz sočivo, levo ili desno od tačke (`gapPx` od centra). */
-function SelectedLabel({ marker, left, top, lens, gapPx = 17 }: { marker: MapMarker; left: number; top: number; lens: Lens; gapPx?: number }) {
-  // Natpis ide na stranu sa više mesta (ime se skraćuje tek kad ni tu ne staje).
-  const flip = left > 50;
+/**
+ * Natpis izabrane stanice: ime + vrednost kroz sočivo, uz tačku ili uz grupu koja je sadrži (`anchor`,
+ * `gapPx` od njenog centra). Strana i poravnanje se biraju tako da natpis prekrije što manje drugih
+ * oznaka (`labelPlacement`); kad uz samu oznaku svaki položaj skriva tačke (gust uvećan okrug), natpis se
+ * odmakne (≤ 48 px) i tanka spojnica ga veže za oznaku. Za ocenu se prvo izmeri prirodna širina natpisa –
+ * do tada je nevidljiv (merenje je u layout efektu, pa se nijedan kadar ne vidi na pogrešnom mestu). Ime
+ * se skraćuje tek kad ni najbolji položaj ne staje u okvir. Ne hvata pokazivač.
+ */
+function SelectedLabel({
+  marker,
+  anchor,
+  marks,
+  frame,
+  lens,
+  gapPx,
+}: {
+  marker: MapMarker;
+  anchor: Pick<MapMark, 'id' | 'x' | 'y'>;
+  marks: ReadonlyArray<MapMark>;
+  frame: LabelFrame;
+  lens: Lens;
+  gapPx: number;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const nameRef = useRef<HTMLSpanElement>(null);
+  const [natural, setNatural] = useState<LabelSize | null>(null);
+  const name = marker.view.station.name;
   const reading = readingText(marker, lens);
+
+  useLayoutEffect(() => {
+    let live = true;
+    const measure = () => {
+      const pill = ref.current;
+      const text = nameRef.current;
+      if (!live || !pill || !text) return;
+      const box = pill.getBoundingClientRect();
+      // Skraćeno ime (text-overflow) ne menja scrollWidth: prirodna širina = okvir + odsečeni deo imena.
+      const width = box.width + Math.max(0, text.scrollWidth - text.getBoundingClientRect().width);
+      setNatural((previous) => (previous && Math.abs(previous.width - width) < 0.5 && Math.abs(previous.height - box.height) < 0.5 ? previous : { width, height: box.height }));
+    };
+    measure();
+    // Veb-font koji stigne posle prvog crtanja menja širinu teksta.
+    document.fonts?.ready.then(measure, () => {});
+    return () => {
+      live = false;
+    };
+  }, [name, reading]);
+
+  const placement = natural ? labelPlacement(marks, anchor, frame, natural, gapPx) : null;
+  const leader = placement?.leader ?? null;
+  const dx = leader ? leader.to.x - leader.from.x : 0;
+  const dy = leader ? leader.to.y - leader.from.y : 0;
   return (
-    <span
-      aria-hidden
-      className="pointer-events-none absolute z-[7] flex items-center gap-1.5 rounded-full border border-border-strong bg-[color-mix(in_oklab,var(--panel-solid)_90%,transparent)] py-0.5 pl-2 pr-2.5 text-[12px] font-medium text-ink shadow-float sm:text-[11px]"
-      style={{
-        left: flip ? undefined : `calc(${left}% + ${gapPx}px)`,
-        right: flip ? `calc(${100 - left}% + ${gapPx}px)` : undefined,
-        top: `${top}%`,
-        // Natpis nikad ne izlazi iz okvira mape (ime se skraćuje).
-        maxWidth: `min(260px, calc(${flip ? left : 100 - left}% - ${gapPx + 2}px))`,
-        transform: 'translateY(-50%)',
-      }}
-    >
-      <span className="truncate">{marker.view.station.name}</span>
-      {reading ? <span className="tnum shrink-0 font-mono text-[12px] text-muted sm:text-[11px]">{reading}</span> : null}
-    </span>
+    <>
+      {leader ? (
+        <span
+          aria-hidden
+          data-testid="selected-leader"
+          className="smap__leader"
+          style={{ left: `${leader.from.x}px`, top: `${leader.from.y}px`, width: `${Math.hypot(dx, dy)}px`, transform: `rotate(${Math.atan2(dy, dx)}rad)` }}
+        />
+      ) : null}
+      <span
+        ref={ref}
+        aria-hidden
+        data-testid="selected-label"
+        data-side={placement?.side}
+        data-align={placement?.align}
+        data-distance={placement?.distance}
+        className="pointer-events-none absolute z-[7] flex items-center gap-1.5 rounded-full border border-border-strong bg-[color-mix(in_oklab,var(--panel-solid)_90%,transparent)] py-0.5 pl-2 pr-2.5 text-[12px] font-medium text-ink shadow-float sm:text-[11px]"
+        style={{
+          left: placement ? `${placement.left}px` : undefined,
+          top: placement ? `${placement.top}px` : undefined,
+          maxWidth: `${placement ? placement.maxWidth : LABEL_MAX_PX}px`,
+          visibility: placement ? undefined : 'hidden',
+        }}
+      >
+        <span ref={nameRef} className="truncate">
+          {name}
+        </span>
+        {reading ? <span className="tnum shrink-0 font-mono text-[12px] text-muted sm:text-[11px]">{reading}</span> : null}
+      </span>
+    </>
   );
 }
 

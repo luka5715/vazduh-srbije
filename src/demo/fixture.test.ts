@@ -2,6 +2,8 @@ import { classify, THRESHOLDS_1H } from '@shared/aqi';
 import { parseSnapshotRecord } from '@shared/aggregate';
 import { describe, expect, it } from 'vitest';
 
+import okruzi from '@/data/okruzi.json';
+import type { GeoCollection, Ring } from '@/lib/geo';
 import { municipalityPosition } from '@/lib/stations';
 
 import { buildDemoCore, buildDemoSyncRuns, buildSpecs, SMOG_PM10_MEDIAN, smogRamp, type DemoCore } from './fixture';
@@ -32,6 +34,34 @@ function distanceKm(a: { lat: number; lon: number }, b: { lat: number; lon: numb
   const dLon = (b.lon - a.lon) * rad;
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
   return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+
+/** Tačka u prstenu poligona (ray casting: paran/neparan broj preseka zraka ka istoku). */
+function insideRing(ring: Ring, point: { lat: number; lon: number }): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > point.lat !== yj > point.lat && point.lon < ((xj - xi) * (point.lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Najmanje rastojanje tačke od ivice prstena (km, ravna aproksimacija oko tačke). */
+function borderDistanceKm(ring: Ring, point: { lat: number; lon: number }): number {
+  const kmLat = 111.2;
+  const kmLon = kmLat * Math.cos((point.lat * Math.PI) / 180);
+  let min = Number.POSITIVE_INFINITY;
+  for (let i = 0; i + 1 < ring.length; i++) {
+    const [ax, ay] = ring[i];
+    const [bx, by] = ring[i + 1];
+    const a = { x: (ax - point.lon) * kmLon, y: (ay - point.lat) * kmLat };
+    const dx = (bx - point.lon) * kmLon - a.x;
+    const dy = (by - point.lat) * kmLat - a.y;
+    const t = Math.max(0, Math.min(1, -(a.x * dx + a.y * dy) / (dx * dx + dy * dy || 1)));
+    min = Math.min(min, Math.hypot(a.x + t * dx, a.y + t * dy));
+  }
+  return min;
 }
 
 describe('demo fixture – podrazumevani skup', () => {
@@ -118,6 +148,21 @@ describe('scenario `beograd` – gusta gradska mreža', () => {
     const others = (c: DemoCore) => c.stations.filter((s) => !/Beograd/.test(s.name)).map((s) => s.name);
     expect(others(core)).toEqual(others(buildDemoCore(now)));
     expect(buildDemoSyncRuns(now, core.stations.length)[0].stationsSeen).toBe(57);
+  });
+
+  it('sve 33 stanice su unutar granice Grada Beograda iz okruzi.json, bar 1,5 km od nje (uvećan okrug pomera tačku do ~2 km)', () => {
+    const feature = (okruzi as GeoCollection).features.find((entry) => entry.properties.name === 'Grad Beograd')!;
+    expect(feature.geometry.type).toBe('Polygon');
+    const ring = feature.geometry.coordinates[0] as Ring;
+    const beograd = buildDemoCore(new Date(TIMES[3]), 'beograd').stations.filter((s) => isBeograd(s.name));
+    expect(beograd).toHaveLength(33);
+    for (const station of beograd) {
+      const point = { lat: station.latitude as number, lon: station.longitude as number };
+      expect(insideRing(ring, point), station.name).toBe(true);
+      expect(borderDistanceKm(ring, point), station.name).toBeGreaterThanOrEqual(1.5);
+    }
+    // Provera same provere: centar Pančeva je van Grada Beograda.
+    expect(insideRing(ring, { lat: 44.87, lon: 20.64 })).toBe(false);
   });
 
   it.each(TIMES)('u %s: beogradske stanice su mešovitih kategorija (bar dve) i sve sveže', (iso) => {

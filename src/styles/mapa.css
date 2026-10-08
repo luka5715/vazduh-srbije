@@ -276,7 +276,7 @@
  * Stakleni disk sa brojem stanica i tankim prstenom udela kategorija (isti jezik kao prsten
  * heroja); ispuna je najčešća kategorija (`--mk`) sa malim alfa, da se broj čita. Dugme je 36 px
  * (dodir), disk `--ck-size` (28 px, kompaktno 20 px – isto kao CLUSTER_DISC_PX u markers.ts).
- * `--mk-size` ovde određuje samo oreol upozorenja (prsten od 32 px koji pulsira do 54 px).
+ * `--mk-size` ovde određuje samo oreol upozorenja (pulsira od 18 do 54 px; statično 41 px).
  */
 .mk--cluster {
   --mk-size: 18px;
@@ -288,6 +288,22 @@
   --mk-size: 13px;
   width: 32px;
   height: 32px;
+}
+
+/* Grupa koja sadrži izabranu stanicu zadržava veličinu oreola i talasa grupe (pravilo izabrane
+   tačke, `.mk[data-selected]`, bi ih smanjilo na 16 px – ispod diska od 28 px). */
+.mk--cluster[data-selected='true'] {
+  --mk-size: 18px;
+}
+
+.smap--compact .mk--cluster[data-selected='true'] {
+  --mk-size: 13px;
+}
+
+/* Statični oreol grupe (smanjeno kretanje): prsten mora da izađe iz diska sa prstenom panela (32 px)
+   i, kad grupa nosi izbor, iz prstena akcenta (36 px) – pri 1,8× bi ostao ispod njih. */
+.mk--cluster .mk__halo {
+  transform: scale(2.3);
 }
 
 .mk__disc {
@@ -391,6 +407,22 @@
     radial-gradient(circle, color-mix(in oklab, var(--muted) 18%, var(--panel-solid)) 56%, transparent 60%),
     conic-gradient(var(--cat-1) 0 45%, var(--cat-2) 45% 85%, var(--cat-3) 85% 100%);
   box-shadow: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Natpis izabrane stanice (vidi markers.ts `labelPlacement`)          */
+/* ------------------------------------------------------------------ */
+
+/* Spojnica od oznake do odmaknutog natpisa: tanka linija u boji akcenta, ispod dugmadi oznaka
+   (z-index 0 – tačke preko nje ostaju cele), od centra oznake (tačka je pokriva) do ivice natpisa.
+   Položaj, dužina i ugao su inline (px). */
+.smap__leader {
+  position: absolute;
+  z-index: 0;
+  height: 1px;
+  transform-origin: 0 50%;
+  background: color-mix(in oklab, var(--accent) 70%, transparent);
+  pointer-events: none;
 }
 
 /* ------------------------------------------------------------------ */

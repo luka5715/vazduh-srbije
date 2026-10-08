@@ -16,6 +16,11 @@ import {
   CLUSTER_MIN,
   CLUSTER_SHIFT_KM,
   clusterNote,
+  LABEL_GAP_PX,
+  LABEL_MARGIN_PX,
+  LABEL_STEPS_PX,
+  labelCandidates,
+  labelPlacement,
   MARKER_DOT_PX,
   MARKER_GAP_PX,
   markerCategoryLabel,
@@ -25,7 +30,9 @@ import {
   neighborInDirection,
   spacingNote,
   summarizeMarkers,
+  type LabelFrame,
   type MapCluster,
+  type MapMark,
 } from './markers';
 
 const NOW = new Date('2026-10-07T09:30:00Z');
@@ -555,6 +562,186 @@ describe('grupe stanica (buildMarks) – 33 izmišljene beogradske stanice (`?de
     expect(neighborInDirection(marks, cluster.id, 'right')).toBe(pancevo.id);
     for (let i = 1; i < marks.length; i++) expect(marks[i].yPct).toBeGreaterThanOrEqual(marks[i - 1].yPct);
   });
+  describe('natpis izabrane stanice (labelPlacement) na uvećanom okrugu', () => {
+    /** Okvir mape u px: desktop 1280 (342×529), telefon 390 (324×465), desktop 1440 (408×587). */
+    const SIZES = [
+      [342, 529],
+      [324, 465],
+      [408, 587],
+    ] as const;
+    /** „Demo stanica Beograd 32 PM10 193“ (208 px) i kraći natpis. */
+    const LABELS = [
+      { width: 208, height: 23 },
+      { width: 150, height: 23 },
+    ];
+    const framed = (widthPx: number, heightPx: number) => {
+      const frame = mapFrame(geometry, widthPx, heightPx, focus);
+      const minDistance = markerSpacing(frame.vb.w, widthPx, MARKER_DOT_PX.full);
+      const marks = buildMarks(views, projection, { lens: 'worst', minDistance, okrug: 'Grad Beograd' }).filter((mark) => markInFrame(mark, frame.vb, 18 * (frame.vb.w / widthPx)));
+      const labelFrame: LabelFrame = { vb: frame.vb, width: widthPx, height: heightPx };
+      const px = (mark: Pick<MapMark, 'x' | 'y'>) => ({ x: ((mark.x - frame.vb.x) / frame.vb.w) * widthPx, y: ((mark.y - frame.vb.y) / frame.vb.h) * heightPx });
+      return { marks, labelFrame, px };
+    };
+
+    it.each(SIZES)('okvir %i×%i: za svaku od 33 stanica natpis ne skriva nijednu drugu oznaku, ceo je u okviru, odmaknut najviše 32 px i najbolji među kandidatima', (widthPx, heightPx) => {
+      const { marks, labelFrame, px } = framed(widthPx, heightPx);
+      const own = marks.filter((mark) => mark.type === 'station' && !mark.dimmed);
+      expect(own).toHaveLength(33);
+      let attached = 0;
+      let oldRuleHidden = 0;
+      for (const selected of own) {
+        for (const label of LABELS) {
+          const candidates = labelCandidates(marks, selected, labelFrame, label, LABEL_GAP_PX.station);
+          const best = labelPlacement(marks, selected, labelFrame, label, LABEL_GAP_PX.station);
+          expect(candidates).toHaveLength(4 * 3 * LABEL_STEPS_PX.length);
+          expect(best).toEqual(candidates[0]);
+          expect(best.fits).toBe(true);
+          expect(best.hidden).toBe(0);
+          expect(best.distance).toBeLessThanOrEqual(32);
+          // Najmanji odmak među položajima bez skrivenih tačaka.
+          expect(best.distance).toBe(Math.min(...candidates.filter((candidate) => candidate.fits && candidate.hidden === 0).map((candidate) => candidate.distance)));
+          // Nezavisna provera: natpis je u okviru i nijedan centar druge oznake nije pod njim.
+          const right = best.left + label.width;
+          const bottom = best.top + label.height;
+          expect(best.left).toBeGreaterThanOrEqual(LABEL_MARGIN_PX);
+          expect(best.top).toBeGreaterThanOrEqual(LABEL_MARGIN_PX);
+          expect(right).toBeLessThanOrEqual(widthPx - LABEL_MARGIN_PX);
+          expect(bottom).toBeLessThanOrEqual(heightPx - LABEL_MARGIN_PX);
+          for (const other of marks) {
+            if (other.id === selected.id) continue;
+            const point = px(other);
+            expect(point.x > best.left && point.x < right && point.y > best.top && point.y < bottom).toBe(false);
+          }
+          const a = px(selected);
+          if (best.distance === 0) {
+            attached++;
+            expect(best.leader).toBeNull();
+            // Uz oznaku: bliža ivica natpisa je tačno na razmaku od centra.
+            if (best.side === 'right') expect(best.left).toBeCloseTo(a.x + LABEL_GAP_PX.station, 6);
+            else if (best.side === 'left') expect(right).toBeCloseTo(a.x - LABEL_GAP_PX.station, 6);
+            else if (best.side === 'above') expect(bottom).toBeCloseTo(a.y - LABEL_GAP_PX.station, 6);
+            else expect(best.top).toBeCloseTo(a.y + LABEL_GAP_PX.station, 6);
+          } else {
+            // Odmaknut: spojnica od centra oznake do bliže ivice natpisa.
+            const { from, to } = best.leader!;
+            expect(from.x).toBeCloseTo(a.x, 6);
+            expect(from.y).toBeCloseTo(a.y, 6);
+            if (best.side === 'right') expect(to.x).toBeCloseTo(best.left, 6);
+            else if (best.side === 'left') expect(to.x).toBeCloseTo(right, 6);
+            else if (best.side === 'above') expect(to.y).toBeCloseTo(bottom, 6);
+            else expect(to.y).toBeCloseTo(best.top, 6);
+            expect(to.x).toBeGreaterThanOrEqual(best.left);
+            expect(to.x).toBeLessThanOrEqual(right);
+            expect(to.y).toBeGreaterThanOrEqual(best.top);
+            expect(to.y).toBeLessThanOrEqual(bottom);
+          }
+          // Dosadašnje pravilo (strana samo po polovini okvira, uz tačku) bi skrivalo tačke.
+          const oldSide = a.x <= widthPx / 2 ? 'right' : 'left';
+          oldRuleHidden += candidates.find((candidate) => candidate.side === oldSide && candidate.align === 'center' && candidate.distance === 0)!.hidden;
+        }
+      }
+      // Bar trećina natpisa ostaje uz samu tačku (bez spojnice); staro pravilo bi skrilo desetine tačaka.
+      expect(attached).toBeGreaterThanOrEqual((own.length * LABELS.length) / 3);
+      expect(oldRuleHidden).toBeGreaterThan(50);
+    });
+  });
+});
+
+describe('natpis izabrane stanice – pravila (labelCandidates)', () => {
+  /** Osnovni okvir (cela zemlja) na `widthPx`; tačke zadate u px okvira. */
+  const setup = (widthPx: number, points: Array<[id: string, xPx: number, yPx: number, type?: MapMark['type']]>) => {
+    const units = 600 / widthPx;
+    const frame: LabelFrame = { vb: { x: 0, y: 0, w: 600, h: (projection.height * widthPx) / 600 / (widthPx / 600) }, width: widthPx, height: (projection.height * widthPx) / 600 };
+    const marks = points.map(([id, x, y, type = 'station']) => ({ id, type, x: x * units, y: y * units }));
+    return { frame, marks };
+  };
+  const label = { width: 180, height: 23 };
+
+  it('bez prepreka važi dosadašnje pravilo: desno u levoj polovini, levo u desnoj; natpis uz oznaku, bez spojnice', () => {
+    const { frame, marks } = setup(343, [
+      ['a', 60, 200],
+      ['b', 300, 200],
+    ]);
+    const a = labelPlacement(marks, marks[0], frame, label, LABEL_GAP_PX.station);
+    expect(a).toMatchObject({ side: 'right', align: 'center', distance: 0, fits: true, hidden: 0, touched: 0, leader: null });
+    expect(a.left).toBeCloseTo(60 + LABEL_GAP_PX.station, 6);
+    expect(a.top).toBeCloseTo(200 - label.height / 2, 6);
+    const b = labelPlacement(marks, marks[1], frame, label, LABEL_GAP_PX.station);
+    expect(b).toMatchObject({ side: 'left', align: 'center', distance: 0, fits: true });
+    expect(b.left + label.width).toBeCloseTo(300 - LABEL_GAP_PX.station, 6);
+  });
+
+  it('natpis ne izlazi iz okvira: uz desnu ivicu ide levo, uz gornju ivicu ostaje u okviru (ne iznad)', () => {
+    const { frame, marks } = setup(343, [
+      ['edge', 335, 200],
+      ['top', 60, 4],
+    ]);
+    const edge = labelPlacement(marks, marks[0], frame, label, LABEL_GAP_PX.station);
+    expect(edge.side).toBe('left');
+    expect(edge.fits).toBe(true);
+    expect(edge.maxWidth).toBe(260);
+    const top = labelPlacement(marks, marks[1], frame, label, LABEL_GAP_PX.station);
+    expect(top.side).not.toBe('above');
+    expect(top.fits).toBe(true);
+    expect(top.top).toBeGreaterThanOrEqual(LABEL_MARGIN_PX);
+  });
+
+  it('skrivena oznaka je gora od dodirnute, a dodirnuta od slobodne strane; disk grupe je prepreka (natpis grupe ne ide preko susedne grupe)', () => {
+    // Okvir od 600 px (obe strane staju). Grupa B 15 px istočno od grupe A: natpis desno bi dodirnuo
+    // njen disk (poluprečnik 16 px) → ide levo iako je A u levoj polovini.
+    const { frame, marks } = setup(600, [
+      ['A', 300, 250, 'cluster'],
+      ['B', 315, 250, 'cluster'],
+    ]);
+    const best = labelPlacement(marks, marks[0], frame, label, LABEL_GAP_PX.cluster);
+    expect(best).toMatchObject({ side: 'left', align: 'center', distance: 0, hidden: 0, touched: 0 });
+    const right = labelCandidates(marks, marks[0], frame, label, LABEL_GAP_PX.cluster).find((candidate) => candidate.side === 'right' && candidate.align === 'center' && candidate.distance === 0)!;
+    expect(right).toMatchObject({ fits: true, hidden: 0, touched: 1 });
+    // Tačka pod natpisom desno (1 skrivena), dve pod natpisom levo (2 skrivene), ništa iznad/ispod: bira
+    // se strana bez skrivenih, a među stranama sa skrivenima desno (1) je bolje od levo (2).
+    const dense = setup(600, [
+      ['s', 300, 250],
+      ['r1', 360, 250],
+      ['l1', 230, 250],
+      ['l2', 210, 250],
+      ['u1', 300, 190],
+      ['d1', 300, 310],
+    ]);
+    const candidates = labelCandidates(dense.marks, dense.marks[0], dense.frame, label, LABEL_GAP_PX.station).filter((candidate) => candidate.distance === 0 && candidate.align === 'center');
+    expect(candidates.find((candidate) => candidate.side === 'right')!.hidden).toBe(1);
+    expect(candidates.find((candidate) => candidate.side === 'left')!.hidden).toBe(2);
+    expect(candidates.find((candidate) => candidate.side === 'above')!.hidden).toBe(0);
+    expect(candidates.indexOf(candidates.find((candidate) => candidate.side === 'right')!)).toBeLessThan(candidates.indexOf(candidates.find((candidate) => candidate.side === 'left')!));
+    expect(labelPlacement(dense.marks, dense.marks[0], dense.frame, label, LABEL_GAP_PX.station)).toMatchObject({ side: 'above', hidden: 0, distance: 0 });
+  });
+
+  it('kad uz oznaku svaki položaj skriva tačke, natpis se odmiče najmanje koliko treba, sa spojnicom do bliže ivice', () => {
+    // Redovi tačaka kroz centar i 28 px iznad/ispod (pojasevi natpisa uz oznaku), 300 px široki.
+    const points: Array<[string, number, number]> = [['s', 171, 250]];
+    for (let x = 20; x <= 320; x += 10) for (const y of [222, 250, 278]) points.push([`p${x}-${y}`, x, y]);
+    const { frame, marks } = setup(343, points);
+    const best = labelPlacement(marks, marks[0], frame, label, LABEL_GAP_PX.station);
+    expect(best.hidden).toBe(0);
+    expect(best.distance).toBe(16);
+    expect(['above', 'below']).toContain(best.side);
+    expect(best.leader).not.toBeNull();
+    expect(best.leader!.from).toEqual({ x: 171, y: 250 });
+    expect(best.leader!.to.x).toBe(171);
+    expect(best.leader!.to.y).toBeCloseTo(best.side === 'above' ? best.top + label.height : best.top, 6);
+    // Uz oznaku bi svaka strana skrila tačke.
+    for (const candidate of labelCandidates(marks, marks[0], frame, label, LABEL_GAP_PX.station).filter((candidate) => candidate.distance === 0)) expect(candidate.hidden).toBeGreaterThan(0);
+  });
+
+  it('preširok natpis za okvir: ne staje nigde, pa se skraćuje do ivice (maxWidth < širine) i ostaje u okviru', () => {
+    const { frame, marks } = setup(200, [['s', 100, 150]]);
+    const best = labelPlacement(marks, marks[0], frame, { width: 260, height: 23 }, LABEL_GAP_PX.station);
+    expect(best.fits).toBe(false);
+    expect(best.maxWidth).toBeLessThanOrEqual(200 - 2 * LABEL_MARGIN_PX);
+    expect(best.maxWidth).toBeGreaterThanOrEqual(48);
+    expect(best.left).toBeGreaterThanOrEqual(LABEL_MARGIN_PX);
+    expect(best.left + best.maxWidth).toBeLessThanOrEqual(200 - LABEL_MARGIN_PX + 1e-6);
+  });
+
 });
 
 describe('grupe stanica – pravilo praga', () => {

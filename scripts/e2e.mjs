@@ -7,8 +7,9 @@
  * stanja na dvomodalan dan, prvi prikaz KPI brojeva bez odbrojavanja, traka „Uživo“ kao jedan
  * tab-stop, plutajuće obaveštenje iznad trake izabrane stanice; ?demo=beograd: grupa stanica
  * „Grad Beograd · 33“ na celoj mapi, dodir/Enter je otvara kao uvećan okrug (33 tačke, mreža na
- * 0,5°, razmernik 20 km), „Ukloni filter“ vraća grupu, kompaktna mapa Pregleda ima istu grupu, na
- * telefonu 390×664 dodir na grupu pa na tačku i dalje daje traku izabrane stanice iznad navigacije.
+ * 0,5°, razmernik 20 km), natpis izabrane stanice ne skriva nijednu tačku (na ivici i u gustom centru),
+ * „Ukloni filter“ vraća grupu, kompaktna mapa Pregleda ima istu grupu, na telefonu 390×664 dodir na
+ * grupu pa na tačku i dalje daje traku izabrane stanice iznad navigacije.
  *
  * Upotreba:  node scripts/e2e.mjs <distDir> <outDir>
  *   distDir – gotov demo build (npr. dist-demo posle `npm run build:demo`)
@@ -709,6 +710,52 @@ const hashParams = (page) => new URLSearchParams(new URL(page.url()).hash.split(
     `okrug=${okrugParam}, dugmadi ${zoomed.buttons} (u okviru ${zoomed.inside}, beogradskih ${zoomed.own}), viewBox ${zoomed.vb}`,
   );
   await page.screenshot({ path: join(outDir, 'beograd-mapa-okrug.png') });
+
+  // Natpis izabrane stanice u gustom okrugu: strana se bira tako da ne skrije nijednu tačku (centar
+  // tačke pod natpisom); kad uz tačku svaki položaj skriva susede, natpis se odmiče uz spojnicu.
+  const labelState = () =>
+    map.evaluate((root) => {
+      const area = root.querySelector('.smap__area').getBoundingClientRect();
+      const label = root.querySelector('[data-testid="selected-label"]');
+      if (!label) return null;
+      const l = label.getBoundingClientRect();
+      const dots = [...root.querySelectorAll('button.mk:not([data-selected="true"]) .mk__dot')].map((dot) => dot.getBoundingClientRect());
+      const hidden = dots.filter((d) => {
+        const cx = (d.left + d.right) / 2;
+        const cy = (d.top + d.bottom) / 2;
+        return cx > l.left && cx < l.right && cy > l.top && cy < l.bottom;
+      }).length;
+      const covered = dots.filter((d) => d.left >= l.left && d.right <= l.right && d.top >= l.top && d.bottom <= l.bottom).length;
+      const inFrame = l.left >= area.left - 0.5 && l.right <= area.right + 0.5 && l.top >= area.top - 0.5 && l.bottom <= area.bottom + 0.5;
+      return {
+        text: label.textContent,
+        side: label.dataset.side,
+        distance: Number(label.dataset.distance),
+        leader: root.querySelectorAll('[data-testid="selected-leader"]').length,
+        hidden,
+        covered,
+        inFrame,
+        size: `${Math.round(l.width)}×${Math.round(l.height)}`,
+      };
+    });
+  // Dugmad od 28 px se preklapaju, pa se klik šalje elementu, ne po koordinatama.
+  await map.locator('button.mk[aria-label^="Demo stanica Beograd 32,"]').evaluate((button) => button.click());
+  await page.waitForTimeout(400);
+  const edgeLabel = await labelState();
+  check(
+    '?demo=beograd Mapa: natpis stanice na ivici gusto naseljenog dela ne skriva nijednu tačku i ceo je u okviru',
+    Boolean(edgeLabel && /Beograd 32/.test(edgeLabel.text) && edgeLabel.hidden === 0 && edgeLabel.covered === 0 && edgeLabel.inFrame),
+    JSON.stringify(edgeLabel),
+  );
+  await map.locator('button.mk[aria-label^="Demo stanica Beograd 1,"]').evaluate((button) => button.click());
+  await page.waitForTimeout(400);
+  const centreLabel = await labelState();
+  check(
+    '?demo=beograd Mapa: natpis stanice u gustom centru ne skriva nijednu tačku (odmaknut uz spojnicu kad mora)',
+    Boolean(centreLabel && /Beograd 1(?!\d)/.test(centreLabel.text) && centreLabel.hidden === 0 && centreLabel.covered === 0 && centreLabel.inFrame && centreLabel.leader === (centreLabel.distance > 0 ? 1 : 0)),
+    JSON.stringify(centreLabel),
+  );
+  await page.screenshot({ path: join(outDir, 'beograd-mapa-okrug-natpis.png') });
 
   // Ponovo cela mreža: čip „Ukloni filter“ u gornjoj traci vraća grupu i razmernik od 50 km.
   await page.locator('header').getByRole('button', { name: /Ukloni filter/ }).click();

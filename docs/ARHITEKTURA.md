@@ -615,6 +615,21 @@ tenantu – izvedeni su iz koda i broja stanica. Konstante su `WRITE_CONCURRENCY
   grupe: jedan krug u boji najčešće kategorije, 1,5× poluprečnika (`CLUSTER_HAZE_SCALE`). Rizik: grupa
   je po okrugu, pa stanica daleko od gustog jezgra istog okruga ulazi u grupu i pomera težište; pogrešno
   mapirana opština (`opstine-okrug.json`, npr. „Palilula“ je niška) bi stanicu svrstala u tuđu grupu.
+  Granični okrug (tri stanice na ~3 km) je grupa na mapi širine ~294–470 px, a tačke od ~494 px: pošto
+  je prag u km, a razmak u px, grupisanje zavisi od širine mape, dakle i od responzivnog rasporeda (prozor
+  od 1280 px daje mapu od 342 px → grupa; prozor od 1100 px mapu od 494 px → tačke), a ne menja se piksel
+  po piksel – to je očekivano i nije greška.
+- **Natpis izabrane stanice** (`labelCandidates`/`labelPlacement` u `markers.ts`, crta ga `SelectedLabel`):
+  u gustom uvećanom okrugu tačke stoje na 14 px, pa bi natpis uz tačku (ranije: desno u levoj polovini
+  okvira, inače levo) prekrio susedne tačke. Kandidati su strana (desno, levo, iznad, ispod) × poravnanje
+  (centriran, počinje uz oznaku, završava se uz nju) × odmak (`LABEL_STEPS_PX` 0/16/32/48 px), a ocena po
+  redu: natpis koji ceo staje u okvir (inače se ime skraćuje do ivice) → manje skrivenih oznaka (centar
+  pod natpisom; prepreke su i diskovi grupa, poluprečnik `markRadiusPx`) → manji odmak → manje dodirnutih
+  (krug oznake seče natpis) → dosadašnje pravilo. Odmaknut natpis dobija tanku spojnicu u boji akcenta
+  (`.smap__leader`, ispod dugmadi oznaka). Prirodna širina natpisa se meri u layout efektu (do tada je
+  nevidljiv), pa se položaj bira po stvarnoj širini, a ne po proceni. Na 33 beogradske demo stanice
+  svaki natpis ima položaj bez skrivenih tačaka (odmak ≤ 32 px), a 12–17 od 33 ostaju uz tačku; isto
+  pravilo važi za natpis grupe koja sadrži izabranu stanicu (na celoj mapi ne ide preko susedne grupe).
 - **Uvećan okrug** (`districtBounds` + `mapFrame(geometry, w, h, focus)` u `geometry.ts`): okvir je
   pravougaonik okruga iz `okruzi.json` sa 12 % ivice (`FOCUS_PADDING`), najmanje 60 km (`FOCUS_MIN_KM`),
   proširen duž jedne ose na odnos strana kontejnera; Grad Beograd ≈ 150 × 200 jedinica → uvećanje 4×,
