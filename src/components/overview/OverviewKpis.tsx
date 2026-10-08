@@ -55,7 +55,7 @@ function StationsTile({ className }: { className?: string }) {
           color="var(--accent)"
           label={`${formatInt(reporting)} od ${formatInt(total)} stanica javlja sveže podatke`}
         >
-          <span className="tnum font-mono text-[10px] text-muted">{formatPercent(share).replace(' ', '')}</span>
+          <span className="tnum font-mono text-[11px] text-muted">{formatPercent(share).replace(' ', '')}</span>
         </RingGauge>
       }
       footer={
@@ -165,7 +165,7 @@ function MedianTile({ parameter }: { parameter: Parameter }) {
           label={`Medijana ${label} mreže po satu, poslednja 24 sata, od ${formatConcentration(Math.min(...finite))} do ${formatConcentration(Math.max(...finite))} ${UNIT}`}
           tooltip={(index, slotValue) => (
             <div>
-              <p className="tnum font-mono text-[11px] text-muted">{formatDateTime(slots[index].t)}</p>
+              <p className="tnum font-mono text-[12px] text-muted sm:text-[11px]">{formatDateTime(slots[index].t)}</p>
               {slotValue === null ? (
                 <p className="mt-0.5 text-muted">
                   {slots[index].n > 0
@@ -222,12 +222,13 @@ function WorstTile({ className }: { className?: string }) {
       actionLabel="Prikaži na mapi."
       aside={
         // Prsten = vrednost / gornja granica kategorije; natpis ispod kaže šta procenat znači.
-        // Visina (prsten + natpis) = najveći dodatak pločice (44/50 px), pa naziv stanice
-        // počinje u istoj visini kao vrednosti susednih pločica.
+        // Od 640 px visina (prsten + natpis) = najveći dodatak pločice (50 px), pa naziv stanice
+        // počinje u istoj visini kao vrednosti susednih pločica; na telefonu je pločica sama u
+        // redu, pa prsten od 32 px (procenat od 11 px staje u unutrašnjih 24 px) ne remeti red.
         <div className="flex flex-col items-center gap-0.5">
           <RingGauge
             value={next ? next.share : 1}
-            size={wide ? 36 : 30}
+            size={wide ? 36 : 32}
             thickness={4}
             color={catVar(category.rank)}
             label={
@@ -236,9 +237,9 @@ function WorstTile({ className }: { className?: string }) {
                 : `${formatConcentration(value)} ${UNIT}, iznad svih SEPA pragova`
             }
           >
-            <span className="tnum font-mono text-[10px] leading-none text-muted">{next ? formatPercent(next.share).replace(' ', '') : '>'}</span>
+            <span className="tnum font-mono text-[11px] leading-none text-muted">{next ? formatPercent(next.share).replace(' ', '') : '>'}</span>
           </RingGauge>
-          <span aria-hidden className="font-mono text-[10px] leading-3 text-muted">
+          <span aria-hidden className="font-mono text-[11px] leading-3 text-muted">
             {next ? 'do praga' : 'iznad'}
           </span>
         </div>

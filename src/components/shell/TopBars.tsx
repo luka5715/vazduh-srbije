@@ -123,7 +123,7 @@ export function MobileTopBar({ className, ref }: { className?: string; ref?: Ref
           <p className="flex min-w-0 items-center gap-1.5">
             <span className="eyebrow truncate !leading-3 !tracking-[0.06em]">SEPA · {source.text}</span>
             {mode === 'demo' ? (
-              <span className="shrink-0 rounded-full bg-warn-soft px-1.5 font-mono text-[11px] font-medium uppercase leading-3.5 tracking-wider text-warn-soft-ink max-[374px]:hidden">
+              <span className="shrink-0 rounded-full bg-warn-soft px-1.5 font-mono text-[12px] font-medium uppercase leading-3.5 tracking-wider text-warn-soft-ink max-[374px]:hidden sm:text-[11px]">
                 demo
               </span>
             ) : null}

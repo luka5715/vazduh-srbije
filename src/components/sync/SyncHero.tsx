@@ -6,133 +6,24 @@ import { RingGauge } from '@/components/fx/RingGauge';
 import { useAtmosfera } from '@/hooks/useAtmosfera';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { cn } from '@/lib/cn';
-import { describeSyncError } from '@/lib/errors';
-import {
-  formatDate,
-  formatDateTime,
-  formatDayMonth,
-  formatDuration,
-  formatHourInterval,
-  formatInt,
-  formatRelative,
-  formatTime,
-  isSameLocalDay,
-  pluralSr,
-  stationsNoun,
-} from '@/lib/format';
-import { LIVE_HOURS } from '@/lib/stations';
+import { formatDate, formatDateTime, formatDuration, formatHourInterval, formatInt, pluralSr, stationsNoun } from '@/lib/format';
+import { liveStatus } from '@/lib/stations';
 import { STALE_MINUTES } from '@/lib/syncRules';
 
 import { setHeroProgressVisible } from './heroProgress';
 import { HistoryStrip } from './HistoryStrip';
 import { SyncActions } from './SyncActions';
 import { useHistoryCoverage } from './useHistoryCoverage';
-import {
-  ageParts,
-  freshnessOf,
-  FUNCTION_LIMIT_MS,
-  RUN_STATUS_COLOR,
-  runDurationMs,
-  summarizeRuns,
-  syncStateOf,
-  type RunSummary,
-  type SyncState,
-} from './runModel';
+import { headlineOf } from './heroHeadline';
+import { ageParts, durationExpectation, freshnessOf, FUNCTION_LIMIT_MS, RUN_STATUS_COLOR, runDurationMs, summarizeRuns, syncStateOf, type RunSummary } from './runModel';
 
 import './sync.css';
 
-interface Headline {
-  lead: string;
-  word: string;
-  /** Boja podvlačenja i tačke (token). */
-  tone: string;
-  sub: ReactNode;
-}
-
-function headlineOf(state: SyncState, lastSync: Date | null, now: Date, mode: 'rayfin' | 'demo', auto: boolean): Headline {
-  const lastOk = lastSync ? `Poslednja uspešna sinhronizacija ${formatRelative(lastSync, now)} (${formatDateTime(lastSync)}).` : '';
-  switch (state.kind) {
-    case 'syncing':
-      return {
-        lead: 'Preuzimanje sa SEPA je',
-        word: 'u toku',
-        tone: 'var(--accent)',
-        sub: auto
-          ? `Automatsko osvežavanje: podaci su bili stariji od ${STALE_MINUTES} min. Funkcija radi na serveru 1–3 minuta.`
-          : 'Funkcija syncAirQuality radi na serveru i obično završi za 1–3 minuta.',
-      };
-    case 'backfilling':
-      return {
-        lead: 'Dopunjava se',
-        word: 'istorija',
-        tone: 'var(--accent)',
-        sub: 'Samo dani koji u bazi nedostaju, od najstarijeg, oko minut po danu. Možete prekinuti u svakom trenutku – sledeće dopunjavanje nastavlja od prvog dana koji još nedostaje.',
-      };
-    case 'remote-running':
-      return {
-        lead: 'Sinhronizacija je',
-        word: 'u toku',
-        tone: 'var(--accent)',
-        sub: `Pokrenuta je ${formatRelative(state.run.startedAt, now)} iz druge sesije i završava se za 1–3 minuta. ${lastOk}`,
-      };
-    case 'empty':
-      return {
-        lead: 'Baza je još',
-        word: 'prazna',
-        tone: 'var(--accent)',
-        sub: 'Prvo preuzimanje povlači satne vrednosti za poslednjih 36 sati sa svih aktivnih stanica i traje 1–3 minuta.',
-      };
-    case 'never-ok': {
-      const { title, hint } = describeSyncError(state.run.message ?? 'Nepoznata greška');
-      return { lead: 'Sinhronizacija još', word: 'nije uspela', tone: 'var(--danger)', sub: `${title}. ${hint}` };
-    }
-    case 'failed': {
-      const { title, hint } =
-        state.status === 'abandoned'
-          ? { title: 'Funkcija nije upisala završetak', hint: 'Verovatno je prekinuta na limitu od 240 s.' }
-          : describeSyncError(state.run.message ?? 'Nepoznata greška');
-      return { lead: 'Poslednji pokušaj', word: 'nije uspeo', tone: 'var(--danger)', sub: `${title}. ${hint} ${lastOk}` };
-    }
-    case 'stale':
-      return {
-        lead: 'Podaci',
-        word: 'kasne',
-        tone: 'var(--warn)',
-        sub: `${lastOk} To je duže od ${STALE_MINUTES} min – osvežite ih ručno${mode === 'rayfin' ? ' (pri sledećem otvaranju aplikacija to radi sama)' : ''}.`,
-      };
-    case 'sepa-late': {
-      const latest = state.latestObservedAt;
-      if (!latest) {
-        return {
-          lead: 'SEPA',
-          word: 'kasni',
-          tone: 'var(--warn)',
-          sub: `Sinhronizacija je uspela, ali u bazi još nema merenja nijedne aktivne stanice. ${lastOk}`,
-        };
-      }
-      const end = new Date(latest.getTime() + 3_600_000);
-      const endText = isSameLocalDay(end, now) ? formatTime(end) : `${formatTime(end)} (${formatDayMonth(end)})`;
-      return {
-        lead: 'SEPA',
-        word: 'kasni',
-        tone: 'var(--warn)',
-        sub: `Sinhronizacija je uspela, ali nema novih merenja od ${endText} – poslednji sat u bazi je ${formatHourInterval(latest)}, ${formatRelative(latest, now)}. Izvor obično objavljuje sa kašnjenjem od 1–${LIVE_HOURS} h; nova merenja stižu sledećom sinhronizacijom. ${lastOk}`,
-      };
-    }
-    case 'fresh':
-      return {
-        lead: 'Podaci su',
-        word: 'sveži',
-        tone: 'var(--ok)',
-        sub:
-          mode === 'demo'
-            ? `${lastOk} U Fabric-u se aplikacija pri otvaranju sama osvežava kad su podaci stariji od ${STALE_MINUTES} min.`
-            : `${lastOk} Pri otvaranju aplikacija sama osvežava podatke kad su stariji od ${STALE_MINUTES} min.`,
-      };
-  }
-}
-
-/** Merač svežine: prsten se puni do praga od 65 min (pun prsten = vreme za osvežavanje). */
+/**
+ * Merač svežine: prsten se puni do praga od 65 min (pun prsten = vreme za osvežavanje). Prag je
+ * tvrda granica automatskog osvežavanja; ono može krenuti i ranije, kad SEPA objavi nov sat
+ * (`shouldAutoSync`), što rečenica heroja kaže.
+ */
 function FreshnessGauge({ lastSync, now, active, size }: { lastSync: Date | null; now: Date; active: boolean; size: number }) {
   const freshness = freshnessOf(lastSync, now);
   const parts = freshness ? ageParts(freshness.ageMs) : null;
@@ -155,7 +46,7 @@ function FreshnessGauge({ lastSync, now, active, size }: { lastSync: Date | null
             <span className={cn('font-heading font-semibold leading-none tracking-[-0.03em] text-ink', big ? 'text-[40px]' : 'text-[26px]')}>
               {parts ? formatInt(parts.value) : '–'}
             </span>
-            <span className={cn('font-mono uppercase tracking-[0.12em] text-muted', big ? 'mt-1.5 text-[11px]' : 'mt-1 text-[11px] tracking-[0.08em]')}>
+            <span className={cn('font-mono text-[12px] uppercase tracking-[0.12em] text-muted sm:text-[11px]', big ? 'mt-1.5' : 'mt-1 tracking-[0.08em]')}>
               {parts ? parts.unit : 'nema'}
             </span>
           </span>
@@ -268,12 +159,20 @@ export function SyncHero({ className, style }: { className?: string; style?: CSS
   const activityKind = sync.activity?.kind ?? null;
   const state = syncStateOf(activityKind, runs, lastSync, now, newestObservedAt);
   const history = useHistoryCoverage();
-  const headline = headlineOf(state, lastSync, now, mode, sync.activity?.kind === 'sync' && sync.activity.auto);
   const summary = summarizeRuns(runs, now);
   // Dnevnik nosi samo poslednjih 10 poslova (posle dopune istorije to mogu biti samo dani
   // istorije) – tada važi poslednja uspešna sinhronizacija iz zasebnog upita.
   const lastOk = summary.lastOkSync ?? data.lastSuccessfulSync;
   const lastOkMs = summary.avgSyncMs === null && lastOk ? runDurationMs(lastOk, 'ok') : null;
+  const expectation = durationExpectation(summary, data.lastSuccessfulSync);
+  const headline = headlineOf(state, {
+    lastSync,
+    now,
+    mode,
+    auto: sync.activity?.kind === 'sync' && sync.activity.auto,
+    expectation,
+    backfillDays: sync.activity?.kind === 'backfill' && !sync.activity.planning ? sync.activity.total : null,
+  });
   const active = activityKind !== null || state.kind === 'remote-running';
   const noun = pluralSr(summary.total, 'posao', 'posla', 'poslova');
   const actionsRef = useRef<HTMLDivElement>(null);
@@ -315,6 +214,7 @@ export function SyncHero({ className, style }: { className?: string; style?: CSS
               mode={mode}
               firstRun={isEmpty || (!lastSync && runs.length === 0)}
               incompleteDays={history.coverage ? history.coverage.incomplete.length : null}
+              expectation={expectation}
             />
           </div>
         </div>
@@ -353,8 +253,9 @@ export function SyncHero({ className, style }: { className?: string; style?: CSS
             <p className="font-heading text-[22px] font-semibold leading-7 tracking-[-0.02em] text-ink">
               {newestObservedAt ? formatHourInterval(newestObservedAt) : '–'}
             </p>
-            <p className="mt-1 text-[12.5px] leading-5 text-muted" title={newestObservedAt ? `Početak intervala: ${formatDateTime(newestObservedAt)}` : undefined}>
-              {newestObservedAt ? `${formatDate(newestObservedAt)} · ${formatRelative(newestObservedAt, now)}` : 'nema merenja'}
+            {/* Starost od KRAJA intervala (`liveStatus().ageText`) – isto što i čip u gornjoj traci i natpis heroja. */}
+            <p className="mt-1 text-[12.5px] leading-5 text-muted" title={newestObservedAt ? `Početak intervala: ${formatDateTime(newestObservedAt)}; starost se računa od kraja intervala` : undefined}>
+              {newestObservedAt ? `${formatDate(newestObservedAt)} · ${liveStatus(newestObservedAt, now).ageText}` : 'nema merenja'}
             </p>
           </StatCell>
         </dl>
@@ -365,6 +266,8 @@ export function SyncHero({ className, style }: { className?: string; style?: CSS
         coverage={history.coverage}
         loading={history.loading}
         error={history.error}
+        errorDetail={history.errorDetail}
+        reload={history.reload}
         activity={sync.activity}
       />
     </GlassPanel>

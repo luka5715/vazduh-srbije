@@ -74,7 +74,7 @@ export function MapPreview({ className, style }: { className?: string; style?: C
                 <li key={rank} className="inline-flex items-center gap-1.5">
                   <CategoryDot rank={rank} size={8} />
                   {CATEGORIES[rank].label}
-                  <span className="tnum font-mono text-[11px] text-ink">{formatInt(counts[rank])}</span>
+                  <span className="tnum font-mono text-[12px] text-ink sm:text-[11px]">{formatInt(counts[rank])}</span>
                 </li>
               ) : null,
             )}

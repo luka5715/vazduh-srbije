@@ -787,6 +787,22 @@ html[data-vt='theme']::view-transition-new(root) {
   }
 }
 
+/*
+ * Oznaka podeoka ose („tick“): brojevi na osama grafikona, granice SEPA skale, satne oznake
+ * toplotne mape, natpisi vrha/dna sparkline-a – u SVG `<text>` ili HTML `<span>`. IBM Plex Mono
+ * sa tabelarnim ciframa; donja granica tipografije: 11 px na telefonu (ispod 640 px), 10 px od
+ * `sm`. Boju (fill-muted / text-faint) i debljinu bira komponenta. Zamenjuje `tnum font-mono
+ * text-[10px]` – nikad ne vraćajte fiksnih 10 px na oznake koje se vide na telefonu.
+ */
+@utility tick-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  @media (min-width: 40rem) {
+    font-size: 10px;
+  }
+}
+
 /* Podvlačenje u boji izmaglice (reč kategorije u naslovu heroja – tekst ostaje u ink boji). */
 /* Pernat sjaj ispod x-visine, bez tvrdih ivica: ne prekriva silazne poteze (j, p). */
 @utility haze-underline {

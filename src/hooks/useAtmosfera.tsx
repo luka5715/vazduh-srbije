@@ -4,8 +4,12 @@
  *
  * Orkestracija sinhronizacije:
  *  - automatska sinhronizacija (samo `rayfin`) kad je poslednja uspešna starija od
- *    `STALE_MINUTES` i niko drugi ne sinhronizuje (`shouldAutoSync`; napušteni i neispravni
- *    redovi ne blokiraju) – pri otvaranju i ponovo posle svakog tihog osvežavanja ispod;
+ *    `STALE_MINUTES`, ILI kad je SEPA po očekivanju već objavila sledeći sat posle najnovijeg
+ *    u bazi (kraj sledećeg sata = `newestObservedAt` + 2 h, plus `EXPECTED_LAG_MINUTES`) a poslednja sinhronizacija je
+ *    starija od `MIN_GAP_MINUTES` – i niko drugi ne sinhronizuje (`shouldAutoSync`; napušteni i
+ *    neispravni redovi ne blokiraju); pri otvaranju i ponovo posle svakog tihog osvežavanja;
+ *  - dnevna statistika mreže (Trendovi, pokrivenost istorije, planiranje dopune) čita se jednom
+ *    po (prvi dan, `dataVersion`) kroz `loadNetworkDaily` i deli između potrošača;
  *  - povratak kartice posle > 10 min i svakih 12 min dok je vidljiva: tiho ponovno čitanje
  *    baze (neuspeh se prijavljuje, podaci ostaju) i ponovna provera pravila od 65 min – kartica
  *    na telefonu koja se vrati uveče ne ostaje na jutarnjim podacima;
@@ -28,6 +32,7 @@ import {
 import { flushSync } from 'react-dom';
 
 import type { CategoryRank } from '@shared/aqi';
+import type { DailyStatRecord } from '@shared/contracts';
 
 import { useAuth } from '@/hooks/AuthContext';
 import { useDashboardData, type DashboardData, type DashboardState, type ReloadOptions } from '@/hooks/useDashboardData';
@@ -122,6 +127,14 @@ export interface AtmosferaValue {
   now: Date;
   /** Raste posle svake sinhronizacije/istorije → ponovno učitavanje dnevne statistike. */
   dataVersion: number;
+  /**
+   * Dnevna statistika cele mreže od `fromDay` (uključivo), kao `service.listNetworkDailyStats`,
+   * ali JEDNO čitanje po (fromDay, `dataVersion`) deljeno između Trendova, pokrivenosti istorije
+   * na Sinhronizaciji i planiranja „Dopuni nedostajuće dane“: ko prvi zatraži pokreće čitanje,
+   * ostali dobijaju isto obećanje (i dok je u toku). Neuspelo čitanje se ne pamti; `fresh`
+   * („Pokušaj ponovo“) zaobilazi keš. Za 30 dana to su 3 strane po 5.000 redova.
+   */
+  loadNetworkDaily: (fromDay: string, options?: { fresh?: boolean }) => Promise<DailyStatRecord[]>;
   /** Poslednja uspešna sinhronizacija trenutnog stanja ili null. */
   lastSync: Date | null;
   syncHealth: SyncHealth;
@@ -209,7 +222,27 @@ export function AtmosferaProvider({ children }: { children: ReactNode }) {
     },
     [reload],
   );
-  const sync = useSync(service, onSyncComplete);
+  // Keš dnevne statistike mreže: ključ je `${dataVersion}|${fromDay}`; unosi starije verzije se
+  // brišu pri prvom zahtevu nove, pa keš nikad ne vraća podatke od pre poslednjeg posla.
+  const networkDailyCache = useRef(new Map<string, Promise<DailyStatRecord[]>>());
+  const loadNetworkDaily = useCallback(
+    (fromDay: string, options?: { fresh?: boolean }): Promise<DailyStatRecord[]> => {
+      const cache = networkDailyCache.current;
+      const prefix = `${dataVersion}|`;
+      for (const key of cache.keys()) if (!key.startsWith(prefix)) cache.delete(key);
+      const key = `${prefix}${fromDay}`;
+      const cached = cache.get(key);
+      if (cached && !options?.fresh) return cached;
+      const promise = service.listNetworkDailyStats(fromDay);
+      cache.set(key, promise);
+      promise.catch(() => {
+        if (cache.get(key) === promise) cache.delete(key);
+      });
+      return promise;
+    },
+    [service, dataVersion],
+  );
+  const sync = useSync(service, onSyncComplete, loadNetworkDaily);
 
   // Sat ide na 30 s kao ranije, ali se stanje menja samo kad se promeni minut.
   useEffect(() => {
@@ -266,13 +299,16 @@ export function AtmosferaProvider({ children }: { children: ReactNode }) {
 
   // Automatska sinhronizacija (samo pravi backend): pri otvaranju i posle svakog tihog
   // ponovnog učitavanja (povratak kartice, periodično) – jednom po učitavanju podataka.
+  // Pravilo gleda i najnoviji sat u bazi: kad je SEPA po očekivanju već objavila sledeći sat,
+  // ne čeka se 65 min od poslednje sinhronizacije (vidi `shouldAutoSync`); između dva
+  // automatska posla u jednoj kartici prođe bar `MIN_GAP_MINUTES`.
   const { startSync, busy, notify } = sync;
   useEffect(() => {
     if (mode !== 'rayfin' || data.status !== 'ready' || autoSyncTried.current || busy) return;
     autoSyncTried.current = true;
     // Napušteni i neispravni `running` redovi ne blokiraju automatsko osvežavanje.
-    if (shouldAutoSync(lastSync, syncRuns, new Date())) void startSync({ auto: true });
-  }, [mode, data.status, syncRuns, lastSync, busy, startSync, autoSyncEpoch]);
+    if (shouldAutoSync(lastSync, syncRuns, new Date(), newestObservedAt)) void startSync({ auto: true });
+  }, [mode, data.status, syncRuns, lastSync, newestObservedAt, busy, startSync, autoSyncEpoch]);
 
   // Kartica koja se vrati posle > 10 min (telefon!) i periodično dok je vidljiva: tiho
   // ponovno čitanje baze (neuspeh se prijavljuje, prikaz ostaje), pa ponovo pravilo od 65 min.
@@ -479,6 +515,7 @@ export function AtmosferaProvider({ children }: { children: ReactNode }) {
       refresh,
       now,
       dataVersion,
+      loadNetworkDaily,
       lastSync,
       syncHealth,
       isEmpty,
@@ -515,6 +552,7 @@ export function AtmosferaProvider({ children }: { children: ReactNode }) {
       refresh,
       now,
       dataVersion,
+      loadNetworkDaily,
       lastSync,
       syncHealth,
       isEmpty,

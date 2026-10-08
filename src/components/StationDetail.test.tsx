@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DailyStatRecord } from '@shared/contracts';
 
 import { buildDemoCore } from '@/demo/fixture';
-import { buildStationViews } from '@/lib/stations';
+import { formatRelative } from '@/lib/format';
+import { buildStationViews, liveStatus } from '@/lib/stations';
 import type { DataService } from '@/services/dataService';
 
 import { StationDetail } from './StationDetail';
@@ -65,6 +66,24 @@ describe('StationDetail', () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }));
   });
   afterEach(() => vi.unstubAllGlobals());
+
+  it('zastarela stanica: starost poslednjeg merenja se računa od kraja intervala, isto kao čip ljuske (R5)', async () => {
+    // Poslednji sat 02:00–03:00Z (04–05 h lokalno) se završio u 03:00Z: pre 6 h 30 min → „pre 7 h“
+    // (zaokruženo); od početka bi bilo 7 h 30 min → „pre 8 h“. Oba mesta (napomena i natpis satnih
+    // vrednosti) koriste starost od kraja.
+    const observedAt = new Date('2026-10-07T02:00:00Z');
+    const stale = { ...beograd, stale: true, observedAt };
+    const endBased = liveStatus(observedAt, NOW).ageText;
+    const startBased = formatRelative(observedAt, NOW);
+    expect(endBased).toBe('pre 7 h');
+    expect(startBased).toBe('pre 8 h');
+    const { container } = render(<StationDetail view={stale} service={service(vi.fn(async () => []))} dataVersion={0} now={NOW} />);
+    await settle();
+    const text = container.textContent ?? '';
+    expect(text).toContain(`Poslednji podaci: 4–5 h · ${endBased}`);
+    expect(text).toContain(`Do poslednjeg merenja (4–5 h, ${endBased}) – zastarele vrednosti.`);
+    expect(text).not.toContain(startBased);
+  });
 
   it('neuspelo osvežavanje sa ranijim podacima: napomena i „Pokušaj ponovo“', async () => {
     let calls = 0;

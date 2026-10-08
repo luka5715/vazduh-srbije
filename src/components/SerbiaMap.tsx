@@ -3,11 +3,14 @@ import { useCallback, useId, useMemo, useRef, useState, type CSSProperties, type
 import { PARAMETER_LABELS, UNIT } from '@shared/aqi';
 
 import { ChartTooltip } from '@/components/charts/ChartTooltip';
-import { mapFrame, mapGeometry } from '@/components/map/geometry';
+import { mapFrame, mapGeometry, unitsToKm } from '@/components/map/geometry';
 import {
   buildMarkers,
+  MARKER_DOT_PX,
   markerColor,
+  markerSpacing,
   neighborInDirection,
+  spacingNote,
   summarizeMarkers,
   type MapMarker,
   type MarkerKind,
@@ -18,7 +21,7 @@ import { CategoryChip } from '@/components/ui/Category';
 import { useMeasure } from '@/hooks/useMeasure';
 import { CATEGORIES, catVar, RANKS } from '@/lib/category';
 import { cn } from '@/lib/cn';
-import { formatConcentration, formatInt, pluralSr } from '@/lib/format';
+import { formatConcentration, formatInt, formatNumber, pluralSr } from '@/lib/format';
 import { lensLabel, okrugLabel, okrugOf, type Lens } from '@/lib/insights';
 import { isInactive, liveStatus, type StationView } from '@/lib/stations';
 
@@ -83,6 +86,10 @@ export const HAZE_CAPTION = 'Izmaglica je ilustracija oko stanica – nije meren
  * Stanice su pravi `<button>` elementi preko mape (cilj 28 px, tooltip i na fokus). Na mapu
  * se ulazi jednim Tab-om; strelice vode do najbliže stanice u tom smeru, Home/End do prve
  * (severno) i poslednje (južno), Enter bira. Kategorija ≥ „Zagađen“ pulsira; izabrana ima talase.
+ *
+ * Preklopljene tačke se razmiču tek koliko tačka zauzima piksela (`markerSpacing`: prečnik
+ * tačke + 2 px preračunat u jedinice okvira iz izmerene širine), pa veća mapa pomera manje;
+ * legenda kaže najveći pomak u km („razmaknute (do N km)“), a tooltip pomerene stanice koliko.
  */
 export function SerbiaMap({
   views,
@@ -112,8 +119,11 @@ export function SerbiaMap({
   const leftPct = (x: number) => ((x - vb.x) / vb.w) * 100;
   const topPct = (y: number) => ((y - vb.y) / vb.h) * 100;
 
-  const markers = useMemo(() => buildMarkers(views, projection, { lens, okrug }), [views, projection, lens, okrug]);
+  // Razmak tačaka iz piksela: dok okvir nije izmeren važi rezervni razmak (jedan kadar).
+  const minDistance = markerSpacing(vb.w, size.width, compact ? MARKER_DOT_PX.compact : MARKER_DOT_PX.full);
+  const markers = useMemo(() => buildMarkers(views, projection, { lens, okrug, minDistance }), [views, projection, lens, okrug, minDistance]);
   const summary = useMemo(() => summarizeMarkers(markers), [markers]);
+  const shiftKm = (units: number) => unitsToKm(geometry, units);
   const withoutPosition = views.filter((view) => view.position === null).length;
   const hovered = markers.find((m) => m.id === hoverId) ?? null;
   const selected = markers.find((m) => m.id === selectedId) ?? null;
@@ -220,8 +230,9 @@ export function SerbiaMap({
               </svg>
             ) : null}
 
+            {/* Natpisi mreže i razmernika: `tick-label` (11 px na telefonu, 10 px od sm) – ne ispod donje granice tipografije. */}
             {!compact && measured ? (
-              <div aria-hidden className="pointer-events-none absolute inset-0 font-mono text-[9px] leading-none text-faint">
+              <div aria-hidden className="tick-label pointer-events-none absolute inset-0 leading-none text-faint">
                 {frame.graticule.map((line) =>
                   line.axis === 'lat' ? (
                     line.pct > 5 && line.pct < 99 ? (
@@ -306,7 +317,7 @@ export function SerbiaMap({
                       placement={below ? 'below' : 'above'}
                       containerWidth={size.width}
                     >
-                      <MarkerTooltip marker={hovered} lens={lens} />
+                      <MarkerTooltip marker={hovered} lens={lens} shiftKm={shiftKm(hovered.shift)} />
                     </ChartTooltip>
                   );
                 })()
@@ -324,6 +335,7 @@ export function SerbiaMap({
             withoutPosition={withoutPosition}
             hiddenInactive={hiddenInactive}
             haze={haze}
+            maxShiftKm={shiftKm(summary.maxShift)}
           />
         ) : null}
       </div>
@@ -340,6 +352,7 @@ function MapLegend({
   withoutPosition,
   hiddenInactive,
   haze,
+  maxShiftKm,
 }: {
   summary: MarkerSummary;
   lens: Lens;
@@ -348,7 +361,10 @@ function MapLegend({
   withoutPosition: number;
   hiddenInactive: number;
   haze: boolean;
+  /** Najveći pomak tačke od pravog mesta zbog razmicanja (km); 0 kad ništa nije pomereno. */
+  maxShiftKm: number;
 }) {
+  const spacing = spacingNote(maxShiftKm);
   const ranked = summary.byRank.reduce((sum, count) => sum + count, 0);
   const inScope = total - summary.dimmed;
   return (
@@ -356,7 +372,7 @@ function MapLegend({
       <div className="flex flex-col gap-2">
         <div className="flex items-baseline justify-between gap-3">
           <p className="eyebrow">Kategorija · {lensLabel(lens)}</p>
-          <p className="tnum shrink-0 font-mono text-[11px] text-muted">
+          <p className="tnum shrink-0 font-mono text-[12px] text-muted sm:text-[11px]">
             {formatInt(ranked)}/{formatInt(inScope)}
           </p>
         </div>
@@ -378,7 +394,7 @@ function MapLegend({
               <li key={rank} className={cn('flex min-w-0 items-center gap-1.5', count === 0 ? 'text-faint' : 'text-ink')}>
                 <MarkerKey kind="exact" color={catVar(rank)} dim={count === 0} />
                 <span className="truncate">{CATEGORIES[rank].label}</span>
-                <span className={cn('tnum ml-auto font-mono text-[11px] @min-[420px]:ml-0 @min-[600px]:ml-auto', count === 0 ? 'text-faint' : 'text-muted')}>{count}</span>
+                <span className={cn('tnum ml-auto font-mono text-[12px] sm:text-[11px] @min-[420px]:ml-0 @min-[600px]:ml-auto', count === 0 ? 'text-faint' : 'text-muted')}>{count}</span>
               </li>
             );
           })}
@@ -393,25 +409,25 @@ function MapLegend({
         <li className="inline-flex items-center gap-1.5">
           <MarkerKey kind="stale" />
           bez svežih podataka
-          <span className="tnum font-mono text-[11px] text-faint">{summary.stale}</span>
+          <span className="tnum font-mono text-[12px] text-faint sm:text-[11px]">{summary.stale}</span>
         </li>
         {summary.none > 0 ? (
           <li className="inline-flex items-center gap-1.5">
             <MarkerKey kind="none" />
             {lens === 'worst' ? 'nema podataka' : `ne meri ${lensLabel(lens)}`}
-            <span className="tnum font-mono text-[11px] text-faint">{summary.none}</span>
+            <span className="tnum font-mono text-[12px] text-faint sm:text-[11px]">{summary.none}</span>
           </li>
         ) : null}
         <li className="inline-flex items-center gap-1.5">
           <MarkerKey kind="exact" color={catVar(3)} halo />
           pulsira: Zagađen i lošije
-          <span className="tnum font-mono text-[11px] text-faint">{summary.alert}</span>
+          <span className="tnum font-mono text-[12px] text-faint sm:text-[11px]">{summary.alert}</span>
         </li>
         {okrug ? (
           <li className="inline-flex items-center gap-1.5">
             <MarkerKey kind="exact" color="var(--muted)" dim />
             van okruga (prigušeno)
-            <span className="tnum font-mono text-[11px] text-faint">{summary.dimmed}</span>
+            <span className="tnum font-mono text-[12px] text-faint sm:text-[11px]">{summary.dimmed}</span>
           </li>
         ) : null}
         {haze ? (
@@ -422,9 +438,9 @@ function MapLegend({
         ) : null}
       </ul>
 
-      <p className="text-xs leading-5 text-muted">
-        Okruzi na Kosovu i Metohiji su prikazani bledo – državna mreža SEPA tamo nema stanica. Bliske
-        stanice su malo razmaknute da se tačke ne preklapaju.
+      <p className="text-xs leading-5 text-muted" data-testid="map-notes">
+        Okruzi na Kosovu i Metohiji su prikazani bledo – državna mreža SEPA tamo nema stanica.
+        {spacing ? ` ${spacing}` : ''}
         {withoutPosition
           ? ` ${withoutPosition} ${pluralSr(withoutPosition, 'stanica nije', 'stanice nisu', 'stanica nije')} na mapi (nepoznata opština).`
           : ''}
@@ -461,7 +477,7 @@ function SelectedLabel({ marker, left, top, lens }: { marker: MapMarker; left: n
   return (
     <span
       aria-hidden
-      className="pointer-events-none absolute z-[7] flex items-center gap-1.5 rounded-full border border-border-strong bg-[color-mix(in_oklab,var(--panel-solid)_90%,transparent)] py-0.5 pl-2 pr-2.5 text-[11px] font-medium text-ink shadow-float"
+      className="pointer-events-none absolute z-[7] flex items-center gap-1.5 rounded-full border border-border-strong bg-[color-mix(in_oklab,var(--panel-solid)_90%,transparent)] py-0.5 pl-2 pr-2.5 text-[12px] font-medium text-ink shadow-float sm:text-[11px]"
       style={{
         left: flip ? undefined : `calc(${left}% + 17px)`,
         right: flip ? `calc(${100 - left}% + 17px)` : undefined,
@@ -472,7 +488,7 @@ function SelectedLabel({ marker, left, top, lens }: { marker: MapMarker; left: n
       }}
     >
       <span className="truncate">{marker.view.station.name}</span>
-      {reading ? <span className="tnum shrink-0 font-mono text-[11px] text-muted">{reading}</span> : null}
+      {reading ? <span className="tnum shrink-0 font-mono text-[12px] text-muted sm:text-[11px]">{reading}</span> : null}
     </span>
   );
 }
@@ -488,7 +504,10 @@ function staleText(observedAt: Date): string {
   return `Poslednji podaci ${label} · ${ageText}`;
 }
 
-function MarkerTooltip({ marker, lens }: { marker: MapMarker; lens: Lens }) {
+/** Napomena u tooltip-u tek kad je pomak primetan na mapi (≥ 0,5 km). */
+const SHIFT_NOTE_KM = 0.5;
+
+function MarkerTooltip({ marker, lens, shiftKm }: { marker: MapMarker; lens: Lens; shiftKm: number }) {
   const { view, reading } = marker;
   const okrug = okrugOf(view);
   const place = [view.station.municipality, okrug ? okrugLabel(okrug) : null].filter(Boolean).join(' · ');
@@ -498,7 +517,7 @@ function MarkerTooltip({ marker, lens }: { marker: MapMarker; lens: Lens }) {
       {place ? <p className="text-muted">{place}</p> : null}
       <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
         {marker.kind === 'none' && view.snapshot && !view.stale ? (
-          <span className="inline-flex h-5 items-center rounded-full border border-border px-1.5 text-[11px] text-muted">Ne meri {lensLabel(lens)}</span>
+          <span className="inline-flex h-5 items-center rounded-full border border-border px-1.5 text-[12px] text-muted sm:text-[11px]">Ne meri {lensLabel(lens)}</span>
         ) : (
           <CategoryChip category={view.stale ? null : reading.category} stale={view.stale} size="sm" />
         )}
@@ -517,6 +536,9 @@ function MarkerTooltip({ marker, lens }: { marker: MapMarker; lens: Lens }) {
       {view.position?.approximate ? <p className="mt-1 text-faint">Približna lokacija (centar okruga)</p> : null}
       {isInactive(view) ? <p className="mt-1 text-faint">Neaktivna stanica (SEPA ju je ugasila)</p> : null}
       {marker.dimmed ? <p className="mt-1 text-faint">Van izabranog okruga</p> : null}
+      {shiftKm >= SHIFT_NOTE_KM ? (
+        <p className="mt-1 text-faint">Tačka je pomerena ≈ {formatNumber(shiftKm, shiftKm < 10 ? 1 : 0)} km da se ne preklapa sa susednom</p>
+      ) : null}
     </>
   );
 }

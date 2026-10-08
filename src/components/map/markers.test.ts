@@ -6,8 +6,18 @@ import type { SnapshotValues, StationRecord, StationSnapshotRecord } from '@shar
 import { createProjection, SERBIA_BBOX } from '@/lib/geo';
 import { buildStationViews, type StationView } from '@/lib/stations';
 
-import { mapFrame, mapGeometry } from './geometry';
-import { buildMarkers, markerCategoryLabel, MIN_MARKER_DISTANCE, neighborInDirection, summarizeMarkers } from './markers';
+import { mapFrame, mapGeometry, unitsToKm } from './geometry';
+import {
+  buildMarkers,
+  MARKER_DOT_PX,
+  MARKER_GAP_PX,
+  markerCategoryLabel,
+  markerSpacing,
+  MIN_MARKER_DISTANCE,
+  neighborInDirection,
+  spacingNote,
+  summarizeMarkers,
+} from './markers';
 
 const NOW = new Date('2026-10-07T09:30:00Z');
 const HOUR = 3_600_000;
@@ -138,6 +148,92 @@ describe('buildMarkers', () => {
   });
 });
 
+describe('razmak tačaka iz piksela (markerSpacing)', () => {
+  it('prečnik tačke + 2 px preračunat u jedinice okvira; bez mere rezervni razmak', () => {
+    // Puna mapa na telefonu (okvir 600 jedinica na 326 px): 14 px → 25,8 jedinica.
+    expect(markerSpacing(600, 326, MARKER_DOT_PX.full)).toBeCloseTo(((MARKER_DOT_PX.full + MARKER_GAP_PX) * 600) / 326, 6);
+    // Šira mapa → manji razmak u jedinicama (tačke se manje pomeraju sa pravog mesta).
+    expect(markerSpacing(600, 700)).toBeLessThan(markerSpacing(600, 344));
+    expect(markerSpacing(600, 0)).toBe(MIN_MARKER_DISTANCE);
+    expect(markerSpacing(0, 300)).toBe(MIN_MARKER_DISTANCE);
+  });
+
+  it('natpis legende: gornja granica u celim km, ničega kad ništa nije pomereno', () => {
+    expect(spacingNote(0)).toBeNull();
+    expect(spacingNote(0.01)).toBeNull();
+    expect(spacingNote(0.4)).toBe('Preklopljene stanice su razmaknute (do 1 km).');
+    expect(spacingNote(12.2)).toBe('Preklopljene stanice su razmaknute (do 13 km).');
+  });
+});
+
+describe('gust skup kao Beograd (9 stanica unutar 12 km)', () => {
+  // Izmišljene koordinate po uzoru na beogradsku mrežu: sve u krugu od ~12 km.
+  const belgrade = make([
+    { id: 'sg', name: 'Beograd Stari grad', municipality: 'Stari grad', lat: 44.818, lon: 20.46, values: { PM10: at(30, 1) }, category: 1 },
+    { id: 'vr', name: 'Beograd Vračar', municipality: 'Vračar', lat: 44.797, lon: 20.472, values: { PM10: at(35, 1) }, category: 1 },
+    { id: 'nb', name: 'Beograd Novi Beograd', municipality: 'Novi Beograd', lat: 44.812, lon: 20.405, values: { PM10: at(40, 1) }, category: 1 },
+    { id: 'ze', name: 'Beograd Zemun', municipality: 'Zemun', lat: 44.845, lon: 20.405, values: { PM10: at(20, 0) }, category: 0 },
+    { id: 'mo', name: 'Beograd Mostar', municipality: 'Savski venac', lat: 44.802, lon: 20.455, values: { PM10: at(60, 2) }, category: 2 },
+    { id: 'zb', name: 'Beograd Zeleno brdo', municipality: 'Zvezdara', lat: 44.78, lon: 20.5, values: { PM10: at(25, 1) }, category: 1 },
+    { id: 'pm', name: 'Beograd Pančevački most', municipality: 'Palilula', lat: 44.823, lon: 20.49, values: { PM10: at(45, 1) }, category: 1 },
+    { id: 'bo', name: 'Beograd Borča', municipality: 'Palilula', lat: 44.87, lon: 20.45, values: { PM10: at(15, 0) }, category: 0 },
+    { id: 'ov', name: 'Beograd Ovča', municipality: 'Palilula', lat: 44.87, lon: 20.53, values: { PM10: at(18, 0) }, category: 0 },
+  ]);
+  const geometry = mapGeometry();
+  const km = (units: number) => unitsToKm(geometry, units);
+
+  function check(widthPx: number, dotPx: number) {
+    const minDistance = markerSpacing(geometry.projection.width, widthPx, dotPx);
+    const markers = buildMarkers(belgrade, geometry.projection, { lens: 'worst', minDistance });
+    expect(markers).toHaveLength(9);
+    for (let i = 0; i < markers.length; i++)
+      for (let j = i + 1; j < markers.length; j++)
+        expect(Math.hypot(markers[i].x - markers[j].x, markers[i].y - markers[j].y)).toBeGreaterThanOrEqual(minDistance - 0.05);
+    const summary = summarizeMarkers(markers);
+    expect(summary.maxShift).toBeCloseTo(Math.max(...markers.map((marker) => marker.shift)), 6);
+    return { markers, maxShiftKm: km(summary.maxShift), minDistance };
+  }
+
+  it('sve stanice su u krugu od 12 km (uzorak je gust kao prava mreža)', () => {
+    const points = belgrade.map((view) => geometry.projection.project(view.position!.lon, view.position!.lat));
+    let maxPair = 0;
+    for (let i = 0; i < points.length; i++) for (let j = i + 1; j < points.length; j++) maxPair = Math.max(maxPair, Math.hypot(points[i][0] - points[j][0], points[i][1] - points[j][1]));
+    expect(km(maxPair)).toBeLessThan(12);
+  });
+
+  it('puna mapa na desktopu (344 px): nijedan par se ne preklapa, a najveći pomak je ≤ 21 km', () => {
+    const { maxShiftKm, minDistance } = check(344, MARKER_DOT_PX.full);
+    expect(km(minDistance)).toBeCloseTo(14.1, 0);
+    expect(maxShiftKm).toBeLessThanOrEqual(21);
+    // Rezervni razmak (30 jedinica, okvir neizmeren): opruga drži pomak ispod 26 km; samo odbijanje
+    // (stari algoritam) je isti skup širilo preko 33 km.
+    const fallback = summarizeMarkers(buildMarkers(belgrade, geometry.projection, { lens: 'worst' }));
+    expect(km(fallback.maxShift)).toBeLessThan(26);
+  });
+
+  it('širi okvir pomera manje: 2xl desktop (420 px) ≤ 15 km, velika mapa (700 px) ≤ 8 km', () => {
+    expect(check(420, MARKER_DOT_PX.full).maxShiftKm).toBeLessThanOrEqual(15);
+    expect(check(700, MARKER_DOT_PX.full).maxShiftKm).toBeLessThanOrEqual(8);
+  });
+
+  it('telefon (326 px) ≤ 20 km; kompaktni pregled (280 px, tačka 9 px) ≤ 21 km', () => {
+    expect(check(326, MARKER_DOT_PX.full).maxShiftKm).toBeLessThanOrEqual(20);
+    expect(check(280, MARKER_DOT_PX.compact).maxShiftKm).toBeLessThanOrEqual(21);
+  });
+
+  it('usamljena stanica daleko od skupa ostaje tačno na mestu (pomak 0)', () => {
+    const withNis = make([
+      { id: 'nis', name: 'Niš', municipality: 'Niš', lat: 43.32, lon: 21.9, values: { PM10: at(30, 1) }, category: 1 },
+      { id: 'sg', name: 'Beograd Stari grad', municipality: 'Stari grad', lat: 44.818, lon: 20.46, values: { PM10: at(30, 1) }, category: 1 },
+      { id: 'vr', name: 'Beograd Vračar', municipality: 'Vračar', lat: 44.797, lon: 20.472, values: { PM10: at(35, 1) }, category: 1 },
+    ]);
+    const markers = buildMarkers(withNis, geometry.projection, { lens: 'worst', minDistance: markerSpacing(600, 344) });
+    expect(markers.find((marker) => marker.id === 'nis')!.shift).toBe(0);
+    expect(markers.find((marker) => marker.id === 'sg')!.shift).toBeGreaterThan(0);
+    expect(summarizeMarkers(markers).maxShift).toBeGreaterThan(0);
+  });
+});
+
 describe('mapGeometry', () => {
   it('ima okruge, mrežu stepeni i razmernik od ~50 km', () => {
     const geometry = mapGeometry();
@@ -146,6 +242,12 @@ describe('mapGeometry', () => {
     expect(geometry.graticule.some((line) => line.axis === 'lon' && line.label === '20°')).toBe(true);
     expect(geometry.scaleBarPct).toBeGreaterThan(5);
     expect(geometry.scaleBarPct).toBeLessThan(30);
+  });
+
+  it('jedinice okvira → km: ceo stepen širine je 111,2 km', () => {
+    const geometry = mapGeometry();
+    expect(unitsToKm(geometry, geometry.unitsPerLat)).toBeCloseTo(111.2, 6);
+    expect(unitsToKm(geometry, 0)).toBe(0);
   });
 });
 

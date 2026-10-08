@@ -75,7 +75,8 @@ function ShellSkeleton() {
  * Ljuska aplikacije „Atmosfera“: aurora u boji izmaglice, bočna traka (≥ 1024 px) ili
  * gornja traka + donja navigacija (telefon), demo traka na vrhu, stranica iz `?view=`,
  * podnožje sa izvorom, paleta komandi (Ctrl/⌘K, „/“) i obaveštenja o sinhronizaciji.
- * Koren nosi `data-ready` (skripta za snimke čeka na njega), `--haze` i visine traka.
+ * Koren nosi `data-ready` (skripta za snimke čeka na njega), `--haze` i visine traka
+ * (`--banner-h`, `--topbar-h`, `--mobilebar-h`, `--bottomnav-h`).
  */
 export function AppShell() {
   const { mode, data, sync, isEmpty, view, hazeColor, hazeRank, paletteOpen, openPalette, closePalette, now } = useAtmosfera();
@@ -83,6 +84,7 @@ export function AppShell() {
   const [bannerRef, bannerSize] = useMeasure<HTMLDivElement>();
   const [topBarRef, topBarSize] = useMeasure<HTMLElement>();
   const [mobileBarRef, mobileBarSize] = useMeasure<HTMLElement>();
+  const [bottomNavRef, bottomNavSize] = useMeasure<HTMLElement>();
   const transitions = useRef(canViewTransition()).current;
   const page = useViewModule(view);
   const heroProgressVisible = useHeroProgressVisible();
@@ -107,19 +109,21 @@ export function AppShell() {
     return () => document.removeEventListener('keydown', onKey);
   }, [paletteOpen, openPalette, closePalette]);
 
-  // Visine traka za lepljive elemente stranica (`--shell-sticky-top` u main.css). Skrivena
-  // traka (display: none) meri 0 px i tada ostaje vrednost iz CSS-a.
+  // Visine traka za lepljive elemente stranica (`--shell-sticky-top` u main.css) i za elemente
+  // iznad donje navigacije (`--bottomnav-h`, uključuje env(safe-area-inset-bottom) – vidi mapa.css).
+  // Skrivena traka (display: none) meri 0 px i tada ostaje vrednost iz CSS-a.
   const style = {
     '--haze': hazeColor,
     '--banner-h': `${Math.round(bannerSize.height)}px`,
     ...(topBarSize.height ? { '--topbar-h': `${Math.round(topBarSize.height)}px` } : null),
     ...(mobileBarSize.height ? { '--mobilebar-h': `${Math.round(mobileBarSize.height)}px` } : null),
+    ...(bottomNavSize.height ? { '--bottomnav-h': `${Math.round(bottomNavSize.height)}px` } : null),
   } as CSSProperties;
 
   let content: ReactNode;
   if (data.status === 'loading') content = <ShellSkeleton />;
   else if (data.status === 'error')
-    content = <ErrorBanner title="Podaci nisu učitani" message={data.error ?? 'Nepoznata greška'} onRetry={() => void data.reload()} />;
+    content = <ErrorBanner title="Podaci nisu učitani" message={data.error ?? 'Nepoznata greška'} detail={data.errorDetail} onRetry={() => void data.reload()} />;
   else if (isEmpty && view !== 'sinhronizacija')
     content = (
       <ErrorBoundary
@@ -222,7 +226,7 @@ export function AppShell() {
         </div>
       </div>
 
-      <BottomNav className="lg:hidden" />
+      <BottomNav ref={bottomNavRef} className="lg:hidden" />
       {/* Paleta je dodatak: ako njen deo ne stigne (mreža, novo postavljanje), aplikacija radi bez nje. */}
       <ErrorBoundary fallback={null}>
         <Suspense fallback={null}>

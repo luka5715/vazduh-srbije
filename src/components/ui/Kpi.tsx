@@ -79,14 +79,17 @@ export interface KpiValueProps {
   unit?: string;
   /** Formatiranje (podrazumevano bez decimala). */
   format?: (value: number) => string;
-  /** Odbrojavanje pri montiranju i osvežavanju (podrazumevano da). */
+  /**
+   * Animirana promena vrednosti pri osvežavanju (≤ 0,5 s; podrazumevano da). Prvi prikaz je
+   * uvek konačna vrednost – nema odbrojavanja od nule (vidi `CountUp`).
+   */
   animate?: boolean;
   /** Veličina: `md` 32 px (pločica), `lg` 48 px (heroj). */
   size?: 'md' | 'lg';
   className?: string;
 }
 
-/** Velika vrednost pločice (Sora, proporcionalne cifre) sa odbrojavanjem. */
+/** Velika vrednost pločice (Sora, proporcionalne cifre); promene se animiraju, prvi prikaz je statičan. */
 export function KpiValue({ value, unit, format = (v) => formatNumber(v, 0), animate = true, size = 'md', className }: KpiValueProps) {
   return (
     <p className={cn('flex items-baseline gap-1.5 font-heading font-semibold leading-none text-ink', size === 'lg' ? 'text-5xl' : 'text-[32px]', className)}>

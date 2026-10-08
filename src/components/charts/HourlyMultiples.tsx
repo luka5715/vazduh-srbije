@@ -5,6 +5,7 @@ import type { SnapshotSeries } from '@shared/contracts';
 
 import { CategoryDot } from '@/components/ui/Category';
 import { useMeasure } from '@/hooks/useMeasure';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { catVar, categoryOf } from '@/lib/category';
 import { formatConcentration, formatNumber, formatTime } from '@/lib/format';
 import { linearScale, nearestSlot, niceMax } from '@/lib/scale';
@@ -88,6 +89,9 @@ function hourReadout(rows: Row[], index: number, hour: string): string {
 export function HourlyMultiples({ series }: HourlyMultiplesProps) {
   const [ref, { width }] = useMeasure<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
+  /** Oznake sati su `tick-label`: 11 px ispod 640 px (znak ≈ 6,8 px), 10 px od `sm` (≈ 6,2 px). */
+  const smUp = useMediaQuery('(min-width: 40rem)', true);
+  const hourLabelWidth = 5 * (smUp ? 6.2 : 6.8);
   const gradientId = useId().replace(/:/g, '');
   const rows = useMemo(() => buildRows(series), [series]);
   const startMs = Date.parse(series.start);
@@ -135,9 +139,10 @@ export function HourlyMultiples({ series }: HourlyMultiplesProps) {
   }
 
   const hourLabel = (i: number) => formatTime(startMs + i * HOUR_MS);
-  // Oznake sati unazad od poslednjeg (trenutnog) sata, svakih 3/4/6/8/12 h – prvi korak
-  // za koji između natpisa ostaje bar ~20 px (natpis „07:00“ je ~30 px).
-  const step = [3, 4, 6, 8, 12].find((s) => s * band >= 52) ?? 12;
+  // Oznake sati unazad od poslednjeg (trenutnog) sata, svakih 3/4/6/8/12 h – prvi korak za koji
+  // između natpisa ostaje bar 8 px: poslednji natpis je poravnat udesno (zauzima celu širinu
+  // levo od kraja ose), prethodni je centriran (pola širine), pa je potreban korak 1,5 širine + 8.
+  const step = [3, 4, 6, 8, 12].find((s) => s * band >= 1.5 * hourLabelWidth + 8) ?? 12;
   const ticks = Array.from({ length: Math.floor((slots - 1) / step) + 1 }, (_, k) => slots - 1 - k * step).filter((i) => i === slots - 1 || xAt(i) - 16 >= x0 - band / 2);
 
   const parameterList = rows.map((r) => PARAMETER_LABELS[r.parameter]).join(', ');
@@ -266,7 +271,7 @@ export function HourlyMultiples({ series }: HourlyMultiplesProps) {
               x={xAt(i)}
               y={height - 5}
               textAnchor={i === slots - 1 ? 'end' : 'middle'}
-              className="tnum fill-muted font-mono text-[10px]"
+              className="tick-label fill-muted"
             >
               {hourLabel(i)}
             </text>

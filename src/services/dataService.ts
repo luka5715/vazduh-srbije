@@ -37,7 +37,8 @@ export interface DataService {
    * ili null. Popunjavanje istorije (`backfill`) ne piše snimke, pa ne sme da „osveži“ prikaz.
    */
   latestSuccessfulSync(): Promise<SyncRunRecord | null>;
-  /** Pokreće funkciju `syncAirQuality` (traje 1–3 min). */
+  /** Pokreće funkciju `syncAirQuality` (trajanje pokazuje dnevnik – `summarizeRuns`; limit funkcije 240 s). */
+
   runSync(hoursBack: number): Promise<SyncResult>;
   /** Pokreće funkciju `backfillDay` za jedan lokalni dan (YYYY-MM-DD). */
   runBackfill(day: string): Promise<BackfillResult>;

@@ -17,7 +17,7 @@ const udf = new UserDataFunctions();
 
 /**
  * Preuzima satna merenja svih aktivnih stanica za poslednjih `hoursBack` sati
- * (3–168, podrazumevano 36; početak prozora se vraća na lokalnu ponoć), osvežava
+ * (3–168, podrazumevano 72; početak prozora se vraća na lokalnu ponoć), osvežava
  * stanice (i deaktivira one kojih više nema u API-ju), snimke trenutnog stanja i
  * dnevnu statistiku za dane koje prozor pokriva.
  */

@@ -28,11 +28,21 @@ type StationSnapshot = VazduhSchema['StationSnapshot'];
 type DailyStat = VazduhSchema['DailyStat'];
 type SyncRun = VazduhSchema['SyncRun'];
 
-/** Veličina strane za paginirane upite (DailyStat raste ~300 redova dnevno). */
+/** Strana za dnevnu statistiku JEDNE stanice (≤ 5 polutanata × dani: 30 dana ≈ 150 redova, 1 strana). */
 const PAGE_SIZE = 1000;
+/**
+ * Strana za dnevnu statistiku CELE mreže: ~87 stanica × do 5 polutanata ≈ 370 redova dnevno, pa
+ * 30 dana ≈ 11.000 redova – sa 1.000 po strani to je 12 uzastopnih zahteva, sa 5.000 tri.
+ * Funkcije već čitaju DailyStat u stranama od 5.000 (`DAY_PAGE` u sync.ts) bez problema.
+ */
+const NETWORK_PAGE_SIZE = 5000;
 /** Gornja granica za jednostrane liste (stanice, snimci: mreža ima ~60 stanica). */
 const SINGLE_PAGE = 1000;
-/** Funkcije traju 1–3 min; Fabric UDF host seče na 240–250 s. */
+/**
+ * Trajanje funkcija je izmereno u dnevniku (`SyncRun`; na tenantu sinhronizacija ~12 s za 87
+ * stanica i 36 h – sa 72 h ≈ 1,5× upisa); Fabric UDF host seče na 240 s, pa klijent čeka 250 s.
+ */
+
 const FUNCTION_TIMEOUT_MS = 240_000;
 /** Osigurač protiv beskonačne petlje kad kursor ne napreduje. */
 const MAX_PAGES = 500;
@@ -230,7 +240,7 @@ export class RayfinDataService implements DataService {
     const rows = await fetchAllPages<DailyStat>((cursor) => {
       let query = this.client.data.DailyStat.select(DAILY_FIELDS)
         .orderBy({ day: 'desc' })
-        .first(PAGE_SIZE);
+        .first(NETWORK_PAGE_SIZE);
       if (cursor) query = query.after(cursor);
       return query.executePaginated();
     }, pastFromDay(fromDay));

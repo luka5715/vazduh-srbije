@@ -7,6 +7,30 @@
  * napretka stoji na sredini staze, tačka toka na sredini veze, orbita miruje.
  */
 
+/*
+ * Donja granica tipografije na telefonu je 12 px (dogovoren prag čitljivosti); od `sm` (640 px)
+ * važe sitnije veličine sa desktopa. Visinu reda bira element (leading-*).
+ *   sync-stamp – vremenske oznake, mono detalji poruka, legenda trake istorije (11,5 px na desktopu)
+ *   sync-fine  – oznake osa i skala trake trajanja (11 px na desktopu)
+ */
+.sync-stamp {
+  font-size: 12px;
+}
+
+.sync-fine {
+  font-size: 12px;
+}
+
+@media (min-width: 40rem) {
+  .sync-stamp {
+    font-size: 11.5px;
+  }
+
+  .sync-fine {
+    font-size: 11px;
+  }
+}
+
 /* Neodređeni napredak (sinhronizacija nema korake): svetli segment klizi preko staze. */
 .sync-indeterminate {
   position: relative;

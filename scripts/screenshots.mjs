@@ -13,6 +13,9 @@
  * Opcije:
  *   --views pregled,mapa,…     stranice (`?view=`): pregled | mapa | stanice | trendovi | sinhronizacija
  *   --variants phone-dark,…    phone-light | phone-dark | desktop-light | desktop-dark
+ *   --scenario smog            demo scenario (`?demo=`, vidi src/services/demoScenario.ts): empty | late |
+ *                              smog | beograd. Bez opcije: podrazumevani demo, nazivi datoteka kao do sada;
+ *                              sa opcijom: adresa `?demo=<scenario>#/?view=…`, datoteke <view>-<variant>-<scenario>
  *   --format jpeg|png          podrazumevano jpeg (kvalitet 88, .jpg); png za proveru piksela
  *   --out <dir>                izlazni folder, podrazumevano docs/screenshots
  *   --no-build                 preskače build i koristi postojeći dist-demo (isto što i SKIP_BUILD=1)
@@ -62,6 +65,8 @@ const DEVICES = {
 };
 const ALL_VARIANTS = ['phone-light', 'phone-dark', 'desktop-light', 'desktop-dark'];
 const ALL_VIEWS = ['pregled', 'mapa', 'stanice', 'trendovi', 'sinhronizacija'];
+/** Demo scenariji iz `src/services/demoScenario.ts` (`DEMO_SCENARIOS` bez `default`). */
+const ALL_SCENARIOS = ['empty', 'late', 'smog', 'beograd'];
 const FORMATS = { jpeg: { ext: 'jpg', options: { type: 'jpeg', quality: 88 } }, png: { ext: 'png', options: { type: 'png' } } };
 
 /** Skup za dokumentaciju (README): Pregled u sve četiri varijante, ostale stranice tamne. */
@@ -85,11 +90,11 @@ const VIEW_SELECTORS = {
   sinhronizacija: [],
 };
 
-/** Čekanje posle `data-ready` (count-up, prstenovi, čestice Košave). */
+/** Čekanje posle `data-ready` (prstenovi i sparkline ≤ 0,7 s, čestice Košave). */
 const SETTLE_MS = 800;
 
 function parseArgs(argv) {
-  const options = { views: null, variants: null, format: 'jpeg', outDir: defaultOutDir, build: !process.env.SKIP_BUILD };
+  const options = { views: null, variants: null, scenario: null, format: 'jpeg', outDir: defaultOutDir, build: !process.env.SKIP_BUILD };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const [flag, inline] = arg.includes('=') ? arg.split(/=(.*)/s, 2) : [arg, undefined];
@@ -108,6 +113,15 @@ function parseArgs(argv) {
       case '--variants':
         options.variants = value().split(',').map((v) => v.trim()).filter(Boolean);
         break;
+      case '--scenario': {
+        const scenario = value().trim();
+        if (!ALL_SCENARIOS.includes(scenario)) {
+          console.error(`[screenshots] Nepoznat scenario „${scenario}“. Dozvoljeno: ${ALL_SCENARIOS.join(', ')}`);
+          process.exit(2);
+        }
+        options.scenario = scenario;
+        break;
+      }
       case '--format': {
         const format = value().toLowerCase();
         options.format = format === 'jpg' ? 'jpeg' : format;
@@ -127,7 +141,9 @@ function parseArgs(argv) {
         break;
       case '--help':
       case '-h':
-        console.log('node scripts/screenshots.mjs [--views pregled,mapa] [--variants phone-dark,desktop-light] [--format jpeg|png] [--out dir] [--no-build]');
+        console.log(
+          'node scripts/screenshots.mjs [--views pregled,mapa] [--variants phone-dark,desktop-light] [--scenario empty|late|smog|beograd] [--format jpeg|png] [--out dir] [--no-build]',
+        );
         process.exit(0);
         break;
       default:
@@ -214,10 +230,10 @@ async function expandToFullHeight(page, width) {
   }
 }
 
-async function capture(browser, url, view, variant, outDir, format) {
+async function capture(browser, url, view, variant, outDir, format, scenario = null) {
   const [device, theme] = variant.split('-');
   const shot = DEVICES[device];
-  const name = `${view}-${variant}`;
+  const name = scenario ? `${view}-${variant}-${scenario}` : `${view}-${variant}`;
   const context = await browser.newContext({
     viewport: shot.viewport,
     deviceScaleFactor: 1,
@@ -245,11 +261,13 @@ async function capture(browser, url, view, variant, outDir, format) {
     }
   }, theme);
 
-  await page.goto(`${url}#/?view=${view}`, { waitUntil: 'load', timeout: 60_000 });
+  // Scenario ide pre `#` (`?demo=smog#/?view=…`) – isto što i `#/?demo=smog`, vidi demoScenario().
+  await page.goto(`${url}${scenario ? `?demo=${scenario}` : ''}#/?view=${view}`, { waitUntil: 'load', timeout: 60_000 });
   await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
   await page.waitForSelector('[data-ready="true"]', { timeout: 60_000 });
   await page.waitForSelector(`[data-testid="view-${view}"]`, { timeout: 30_000 });
-  for (const selector of VIEW_SELECTORS[view] ?? []) {
+  // Prazna baza nema grafikone – ne čekamo njihove `path` elemente.
+  for (const selector of scenario === 'empty' ? [] : (VIEW_SELECTORS[view] ?? [])) {
     await page.waitForSelector(selector, { timeout: 60_000 });
   }
   await page.evaluate(() => document.fonts.ready);
@@ -298,7 +316,7 @@ async function main() {
   const results = [];
   try {
     for (const [view, variant] of options.shots) {
-      results.push(await capture(browser, url, view, variant, options.outDir, options.format));
+      results.push(await capture(browser, url, view, variant, options.outDir, options.format, options.scenario));
     }
   } finally {
     await browser.close();

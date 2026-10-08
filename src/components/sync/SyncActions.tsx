@@ -7,6 +7,7 @@ import { cn } from '@/lib/cn';
 import { formatDayLong, formatDayShort, formatInt } from '@/lib/format';
 
 import { OUTCOME_STYLE } from './outcomeStyle';
+import { backfillEtaText, expectedSyncDuration, UNMEASURED, type DurationExpectation } from './runModel';
 import { formatElapsed, useElapsed } from './useElapsed';
 
 import './sync.css';
@@ -126,7 +127,7 @@ export function BackfillProgress({
       </div>
       {compact ? null : (
         <>
-          <div aria-hidden className="mt-1.5 flex justify-between font-mono text-[11px] uppercase tracking-[0.08em] text-faint">
+          <div aria-hidden className="sync-fine mt-1.5 flex justify-between font-mono uppercase tracking-[0.08em] text-faint">
             <span>{days[0] ? formatDayShort(days[0]) : ''}</span>
             <span>{days.length > 1 ? formatDayShort(days[days.length - 1]) : ''}</span>
           </div>
@@ -137,8 +138,21 @@ export function BackfillProgress({
   );
 }
 
-/** Napredak sinhronizacije: neodređena traka + proteklo vreme (funkcija nema korake). */
-export function SyncProgress({ activity, compact = false, className }: { activity: Extract<SyncActivity, { kind: 'sync' }>; compact?: boolean; className?: string }) {
+/**
+ * Napredak sinhronizacije: neodređena traka + proteklo vreme (funkcija nema korake). Očekivano
+ * trajanje dolazi iz izmerenih poslova (`expectation`); bez merenja piše „ispod minuta“.
+ */
+export function SyncProgress({
+  activity,
+  expectation = UNMEASURED,
+  compact = false,
+  className,
+}: {
+  activity: Extract<SyncActivity, { kind: 'sync' }>;
+  expectation?: DurationExpectation;
+  compact?: boolean;
+  className?: string;
+}) {
   const elapsed = useElapsed(activity.startedAt);
   return (
     <div className={cn('min-w-0', className)}>
@@ -146,7 +160,7 @@ export function SyncProgress({ activity, compact = false, className }: { activit
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-[13px] leading-5">
           <p className="font-semibold text-ink">{activity.auto ? 'Automatsko osvežavanje' : 'Preuzimanje sa SEPA'}</p>
           <p className="text-muted">
-            <span className="tnum font-mono text-ink">{formatElapsed(elapsed)}</span> · obično 1–3 min
+            <span className="tnum font-mono text-ink">{formatElapsed(elapsed)}</span> · obično {expectedSyncDuration(expectation)}
           </p>
         </div>
       )}
@@ -175,6 +189,8 @@ export interface SyncActionsProps {
    * 0 → „Istorija je potpuna“ (dugme onemogućeno); bez podatka → „Dopuni nedostajuće dane“.
    */
   incompleteDays?: number | null;
+  /** Izmerena trajanja iz dnevnika za tekst „obično oko 12 s“; bez njih tekst kaže „ispod minuta“. */
+  expectation?: DurationExpectation;
   size?: 'md' | 'lg';
   /** Dugmad se šire do pune širine reda (uska kolona: kad ne staju u jedan red, svako dobija svoj). */
   stretch?: boolean;
@@ -194,6 +210,7 @@ export function SyncActions({
   mode,
   firstRun = false,
   incompleteDays,
+  expectation = UNMEASURED,
   size = 'lg',
   stretch = false,
   className,
@@ -251,13 +268,13 @@ export function SyncActions({
 
       {activity ? (
         <div className="rounded-tile border border-border bg-card-2 px-3.5 py-3">
-          {activity.kind === 'sync' ? <SyncProgress activity={activity} /> : <BackfillProgress activity={activity} />}
+          {activity.kind === 'sync' ? <SyncProgress activity={activity} expectation={expectation} /> : <BackfillProgress activity={activity} />}
         </div>
       ) : (
         <p className="text-[13px] leading-5 text-muted">
           {mode === 'demo'
             ? 'Demo: funkcije se samo simuliraju, ništa se ne preuzima sa SEPA.'
-            : 'Funkcije rade na serveru 1–3 min. Dani koji nedostaju se dopunjavaju jedan po jedan, od najstarijeg; posle prekida se nastavlja od prvog koji još nedostaje.'}
+            : `Sinhronizacija radi na serveru i obično traje ${expectedSyncDuration(expectation)}. Dani koji nedostaju se dopunjavaju jedan po jedan, od najstarijeg (${backfillEtaText(expectation, historyComplete ? null : incompleteDays)}); posle prekida se nastavlja od prvog koji još nedostaje.`}
         </p>
       )}
 

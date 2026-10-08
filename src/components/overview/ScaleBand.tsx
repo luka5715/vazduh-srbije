@@ -60,7 +60,7 @@ export function ScaleBand({ parameter, value, subject, className }: ScaleBandPro
         {limits.map((limit, index) => (
           <span
             key={limit}
-            className={cn('tnum absolute top-0 -translate-x-1/2 font-mono text-[10px] leading-[14px] text-faint', index % 2 === 1 && 'ov-scale__minor')}
+            className={cn('tick-label absolute top-0 -translate-x-1/2 leading-[14px] text-faint', index % 2 === 1 && 'ov-scale__minor')}
             style={{ left: `${(((index + 1) / 6) * 100).toFixed(2)}%` }}
           >
             {formatInt(limit)}

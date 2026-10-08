@@ -17,7 +17,8 @@ import { useChartPointer } from './useTouchInspect';
 
 const TOP = 10;
 const BOTTOM = 26;
-const LEFT = 40;
+/** Levo: oznake y-ose „100 %“ u `tick-label` (11 px na telefonu ≈ 33 px) + 8 px razmaka. */
+const LEFT = 42;
 const RIGHT = 4;
 /** Razmak u boji površine između segmenata (2 px). */
 const GAP = 2;
@@ -159,7 +160,7 @@ export function NetworkTrendChart({ rows, today = todayLocal(), label }: Network
             <g key={t}>
               <line x1={x0} x2={x1} y1={Math.round(y(t)) + 0.5} y2={Math.round(y(t)) + 0.5} className={t === 0 ? 'stroke-border-strong' : 'stroke-grid'} strokeWidth={1} />
               {t === 0 || t === 0.5 || t === 1 ? (
-                <text x={x0 - 8} y={y(t) + 3.5} textAnchor="end" className="tnum fill-muted font-mono text-[10px]">
+                <text x={x0 - 8} y={y(t) + 3.5} textAnchor="end" className="tick-label fill-muted">
                   {formatPercent(t)}
                 </text>
               ) : null}
@@ -257,7 +258,7 @@ export function NetworkTrendChart({ rows, today = todayLocal(), label }: Network
                 x={i === n - 1 ? x1 : xCenter(i)}
                 y={height - 8}
                 textAnchor={i === n - 1 ? 'end' : 'middle'}
-                className={cn('tnum font-mono text-[10px]', hover === i ? 'fill-ink font-semibold' : 'fill-muted')}
+                className={cn('tick-label', hover === i ? 'fill-ink font-semibold' : 'fill-muted')}
               >
                 {dayLabel(i)}
               </text>
@@ -268,7 +269,7 @@ export function NetworkTrendChart({ rows, today = todayLocal(), label }: Network
               x={Math.min(x1 - 21, Math.max(x0 + 21, xCenter(hover)))}
               y={height - 8}
               textAnchor="middle"
-              className="tnum fill-ink font-mono text-[10px] font-semibold"
+              className="tick-label fill-ink font-semibold"
             >
               {dayLabel(hover)}
             </text>

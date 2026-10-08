@@ -3,12 +3,21 @@ import { describe, expect, it } from 'vitest';
 import type { SyncRunRecord } from '@shared/contracts';
 import { dayUtcRange } from '@shared/time';
 
+import { SYNC_HOURS_BACK } from '@/hooks/useSync';
+
 import {
   ageParts,
+  backfillDayMs,
   backfillDayOf,
+  backfillEtaText,
+  durationExpectation,
+  durationScaleMs,
+  expectedDurationText,
+  expectedSyncDuration,
   freshnessOf,
   groupRunsByDay,
   isStoppedOutcome,
+  roughDuration,
   runDurationMs,
   runMessage,
   runMissingStations,
@@ -16,6 +25,8 @@ import {
   runWindowText,
   summarizeRuns,
   syncStateOf,
+  syncWindowText,
+  UNMEASURED,
 } from './runModel';
 
 const NOW = new Date('2026-10-07T10:20:00Z'); // 12:20 u Beogradu
@@ -197,5 +208,73 @@ describe('SEPA kasni', () => {
   it('zaustavljena istorija je neutralan ishod', () => {
     expect(isStoppedOutcome({ kind: 'backfill', ok: false, tone: 'stopped', title: 'x', at: NOW })).toBe(true);
     expect(isStoppedOutcome({ kind: 'backfill', ok: false, tone: 'error', title: 'x', at: NOW })).toBe(false);
+  });
+});
+
+describe('očekivano trajanje iz izmerenih poslova (R9)', () => {
+  const sync = (id: string, ms: number) => run({ id, finishedAt: new Date(NOW.getTime() - 12 * MIN + ms) });
+  const backfill = (id: string, ms: number) => run({ id, kind: 'backfill', finishedAt: new Date(NOW.getTime() - 12 * MIN + ms) });
+
+  it('sažetak računa i prosek dana istorije, odvojeno od sinhronizacija', () => {
+    const summary = summarizeRuns([sync('1', 12_000), sync('2', 14_000), backfill('b1', 40_000), run({ id: 'e', status: 'error' })], NOW);
+    expect(summary.avgSyncMs).toBe(13_000);
+    expect(summary.avgBackfillMs).toBe(40_000);
+    expect(summarizeRuns([run({ id: 'e', status: 'error' })], NOW)).toMatchObject({ avgSyncMs: null, avgBackfillMs: null });
+  });
+
+  it('grubo zaokruživanje: sekunde, 10 s preko minuta, minuti, sati', () => {
+    expect(roughDuration(12_340)).toBe('12 s');
+    expect(roughDuration(400)).toBe('1 s');
+    expect(roughDuration(91_500)).toBe('1 min 30 s');
+    expect(roughDuration(7 * MIN + 20_000)).toBe('7 min');
+    expect(roughDuration(70 * MIN)).toBe('1 h 10 min');
+    expect(roughDuration(120 * MIN)).toBe('2 h');
+  });
+
+  it('izmerena sinhronizacija: „obično oko 12 s · limit 240 s“', () => {
+    const expectation = durationExpectation(summarizeRuns([sync('1', 12_000)], NOW));
+    expect(expectation).toEqual({ syncMs: 12_000, backfillMs: null });
+    expect(expectedSyncDuration(expectation)).toBe('oko 12 s');
+    expect(expectedDurationText(expectation)).toBe('obično oko 12 s · limit 240 s');
+  });
+
+  it('bez merenja ne izmišlja broj: „ispod minuta“', () => {
+    expect(expectedSyncDuration(UNMEASURED)).toBe('ispod minuta');
+    expect(expectedDurationText(UNMEASURED)).toBe('obično ispod minuta · limit 240 s');
+    expect(backfillEtaText(UNMEASURED, 30)).toBe('obično ispod minuta po danu');
+    expect(backfillDayMs(UNMEASURED)).toBeNull();
+  });
+
+  it('dnevnik bez sinhronizacije: važi poslednja uspešna iz zasebnog upita', () => {
+    const summary = summarizeRuns([backfill('b1', 40_000)], NOW);
+    expect(durationExpectation(summary, sync('old', 20_000))).toEqual({ syncMs: 20_000, backfillMs: 40_000 });
+    expect(durationExpectation(summary)).toEqual({ syncMs: null, backfillMs: 40_000 });
+  });
+
+  it('procena po danu: iz izmerenih dana istorije, inače 24 h od prozora sinhronizacije', () => {
+    expect(backfillDayMs({ syncMs: 12_000, backfillMs: 40_000 })).toBe(40_000);
+    expect(backfillDayMs({ syncMs: 12_000, backfillMs: null })).toBeCloseTo((12_000 * 24) / SYNC_HOURS_BACK);
+    expect(backfillEtaText({ syncMs: null, backfillMs: 40_000 }, 30)).toBe('oko 40 s po danu, ukupno oko 20 min za 30 dana');
+    expect(backfillEtaText({ syncMs: null, backfillMs: 40_000 }, 1)).toBe('oko 40 s po danu, ukupno oko 40 s za 1 dan');
+    expect(backfillEtaText({ syncMs: null, backfillMs: 40_000 })).toBe('oko 40 s po danu');
+    expect(backfillEtaText({ syncMs: null, backfillMs: 40_000 }, 0)).toBe('oko 40 s po danu');
+  });
+
+  it('skala trake trajanja: najduži posao u dnevniku, najmanje 60 s; napušteni i u toku ne računaju se', () => {
+    expect(durationScaleMs([sync('1', 12_000), sync('2', 30_000)], NOW)).toBe(60_000);
+    expect(durationScaleMs([sync('1', 12_000), backfill('b', 142_000)], NOW)).toBe(142_000);
+    const abandoned = run({ id: 'a', status: 'running', startedAt: new Date(NOW.getTime() - 20 * MIN), finishedAt: null });
+    expect(durationScaleMs([abandoned], NOW)).toBe(60_000);
+    expect(durationScaleMs([], NOW)).toBe(60_000);
+  });
+});
+
+describe('prozor sinhronizacije rečima (R14)', () => {
+  it('slaže broj sati: 72 sata, 36 sati, 1 sat; kratko sa „h“', () => {
+    expect(syncWindowText(false, 72)).toBe('poslednja 72 sata');
+    expect(syncWindowText(false, 36)).toBe('poslednjih 36 sati');
+    expect(syncWindowText(false, 1)).toBe('poslednji 1 sat');
+    expect(syncWindowText(true, 72)).toBe('poslednja 72 h');
+    expect(syncWindowText()).toBe(syncWindowText(false, SYNC_HOURS_BACK));
   });
 });

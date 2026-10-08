@@ -3,8 +3,30 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { CategoryLegend } from '@/components/charts/CategoryLegend';
 
-import { RefreshFailedNote } from './Feedback';
+import { ErrorBanner, RefreshFailedNote } from './Feedback';
 import { KpiDelta } from './Kpi';
+
+describe('ErrorBanner', () => {
+  it('ljudska poruka je vidljiva, sirova greška samo pod sklopivim „Detalji“; bez detalja nema sklopa', () => {
+    const onRetry = vi.fn();
+    const { rerender } = render(
+      <ErrorBanner title="Podaci nisu učitani" message="Greška pri čitanju baze. Pokušajte ponovo; ako se ponavlja, javite vlasniku." detail="GraphQL errors: filter gte is not supported" onRetry={onRetry} />,
+    );
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('Podaci nisu učitani');
+    expect(alert.textContent).toContain('Greška pri čitanju baze.');
+    const details = alert.querySelector('details');
+    expect(details).not.toBeNull();
+    expect(details?.open).toBe(false);
+    expect(details?.querySelector('summary')?.textContent).toBe('Detalji');
+    expect(details?.textContent).toContain('filter gte is not supported');
+    fireEvent.click(screen.getByRole('button', { name: 'Pokušaj ponovo' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    rerender(<ErrorBanner title="Podaci nisu učitani" message="Nepoznata greška" />);
+    expect(screen.getByRole('alert').querySelector('details')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+});
 
 describe('RefreshFailedNote', () => {
   it('bez vremena: ranije učitani podaci, dugme ponovo učitava', () => {

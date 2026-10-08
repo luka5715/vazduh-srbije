@@ -25,7 +25,12 @@ Jedna Fabric stavka (`rayfin/rayfin.yml`, id `vazduh-srbije`) sa četiri servisa
 
 Frontend radi u dva režima (`VITE_SERVICE_MODE`): `rayfin` (podrazumevano, pravi backend) i `demo`
 (determinističke izmišljene stanice, bez mreže, trajna traka „DEMO PODACI“). U `rayfin` režimu demo
-podaci se nikad ne prikazuju, ni kao zamena pri grešci (`src/services/dataService.ts`).
+podaci se nikad ne prikazuju, ni kao zamena pri grešci (`src/services/dataService.ts`). Demo ima scenarije
+`?demo=empty|late|smog|beograd` (pre ili posle `#`; `src/services/demoScenario.ts`, podaci u
+`src/demo/fixture.ts`): prazna baza, SEPA kasni 4 h, izmišljena epizoda smoga (poslednjih 96 h PM raste do
+medijane PM10 ≈ 300 µg/m³ – najjača izmaglica i najgušće čestice, za proveru kontrasta) i gust beogradski
+klaster (devet izmišljenih stanica u krugu od 12 km umesto dve, mešovitih kategorija – za proveru razmaka
+markera). Traka „DEMO PODACI“ nosi napomenu scenarija (`DEMO_SCENARIO_NOTES`).
 
 ## 2. Entiteti (`rayfin/data`)
 
@@ -95,8 +100,12 @@ ističe). Prošli dan se ne prepisuje redom sa manje sati (§4.1, korak 6).
 | `message?` | `@text({ max: 1000, optional })` – greška ili do 5 upozorenja |
 
 Oblik upozorenja je ugovor između funkcija i frontenda (`@shared/syncNotes`): `Stanica N: <greška>` za
-stanicu bez odgovora izvora i `N stanica preskočeno – vremenski limit` za stanice preskočene zbog roka.
-`ok` red sa bar jednim takvim upozorenjem frontend prikazuje kao **„Delimično“** – bez nove kolone.
+stanicu bez odgovora izvora, `N stanica preskočeno – vremenski limit` za stanice preskočene zbog roka i
+`N redova nije upisano u bazu` (`unwrittenRowsWarning`, sa padežima: „1 red nije upisan“, „3 reda nisu
+upisana“, „5 redova nije upisano“) za redove koje ni ponovni pokušaj upisa nije prošao (§4.1). `ok` red
+sa bar jednim takvim upozorenjem frontend prikazuje kao **„Delimično“** (`summarizeSyncWarnings().partial`)
+– bez nove kolone; posao u kome baza nije primila ništa (ili većinu redova) je `error` sa porukom
+„Baza nije prihvatila upise: …“ i ostaje greška (`runStatus` gleda upozorenja samo kod `ok` redova).
 Red sa početkom ili završetkom više od 5 min u budućnosti, ili sa nepoznatom vrstom/statusom, je
 **neispravan** (`isRunInvalid` u `src/lib/syncRules.ts`): ne utiče ni na šta i u dnevniku piše
 „Neispravan zapis“.
@@ -115,7 +124,7 @@ Registracija je u `src/function_app.ts` preko `udf.func(name, handler, [])` iz
 
 | Funkcija | Ulaz (generisani `AppFunctionsSchema`) | Izlaz |
 | --- | --- | --- |
-| `syncAirQuality` | `{ hoursBack: number }` – 3–168, UI šalje 36 | `SyncResult` – `ok, syncRunId, from, to, stationsSeen, stationsWritten, observationsSeen, snapshotsWritten, dailyStatsWritten, durationMs, warnings[], error?` |
+| `syncAirQuality` | `{ hoursBack: number }` – 3–168, UI šalje 72 (`SYNC_HOURS_BACK`) | `SyncResult` – `ok, syncRunId, from, to, stationsSeen, stationsWritten, observationsSeen, snapshotsWritten, dailyStatsWritten, durationMs, warnings[], error?` |
 | `backfillDay` | `{ day: string }` – `YYYY-MM-DD` u poslednjih 30 dana | `BackfillResult` – `ok, syncRunId, day, stationsSeen, observationsSeen, dailyStatsWritten, durationMs, warnings[], error?` |
 
 Frontend ih poziva isključivo kroz `RayfinDataService`:
@@ -147,7 +156,9 @@ fajla, pa se izmena potpisa funkcije vidi kao greška tipa na svakom pozivu.
 
 ### 4.1 `runSync(ctx, hoursBack)` – `syncAirQuality`
 
-1. **Prozor.** `hoursBack` se zaokružuje i ograničava na `[3, 168]`; ako nije broj, uzima se 36.
+1. **Prozor.** `hoursBack` se zaokružuje i ograničava na `[3, 168]`; ako nije broj, uzima se
+   `DEFAULT_HOURS_BACK = 72` – isti broj kao `SYNC_HOURS_BACK` u `src/hooks/useSync.ts` (menjaju se
+   zajedno). 72 h, a ne 36, da se rupa preko vikenda (petak 18 h → ponedeljak 8 h = 62 h) sama zatvori.
    Početak prozora `now − hoursBack·1h` vraća se na **lokalnu ponoć** (`Europe/Belgrade`) tog dana
    (`dayUtcRange(localDay(rawFrom)).from`), kraj je `now`. Tako je svaki lokalni dan koji prozor dodiruje
    pokriven od 00:00 – potpuni su svi osim današnjeg – a stvarni prozor je najviše `hoursBack + 24 h`.
@@ -197,10 +208,27 @@ fajla, pa se izmena potpisa funkcije vidi kao greška tipa na svakom pozivu.
    `hours`). Na rubu zadržavanja API-ja izvor vraća samo deo dana, pa bi ponovno učitavanje inače
    zamenilo potpun dan delimičnim. Današnji dan se uvek piše i svaka sledeća sinhronizacija ga dopunjava.
 8. **Zatvaranje.** `SyncRun.status = 'ok'`, `rowsWritten = stanice + snimci + dnevne statistike`,
-   `message` = prvih 5 upozorenja spojenih sa ` | ` (skraćeno na 900 znakova); upozorenje o roku je
-   prvo, da preživi skraćivanje. U `catch` grani: `status = 'error'`, `message = greška` (skraćena na
-   900 znakova), rezultat `ok: false`. Ako host prekine funkciju pre ovog koraka, red ostaje `running`
-   i posle 5 min ga frontend prikazuje kao „Prekinuto bez završetka“.
+   `message` = prvih 5 upozorenja spojenih sa ` | ` (skraćeno na 900 znakova); redosled je rok, pa
+   neupisani redovi, pa stanice – zbirna upozorenja prva, da prežive skraćivanje (`addUnwrittenWarning`).
+   U `catch` grani: `status = 'error'`, `message = greška` (skraćena na 900 znakova), rezultat `ok: false`.
+   Ako host prekine funkciju pre ovog koraka, red ostaje `running` i posle 5 min ga frontend prikazuje
+   kao „Prekinuto bez završetka“.
+
+**Ponovni pokušaj upisa** (`writeWithRetry`; važi za svaki `create`/`update` u koracima 4, 6 i 7 i u
+istoriji). Upis koji padne na **prolaznoj** grešci – HTTP 429 ili 5xx (status sa objekta greške:
+`status`, `statusCode`, `response.status`, ugnežđeni `cause`; ili tekst „HTTP 503“, „fetch failed“,
+`ECONNRESET` …), `TypeError` (undici `fetch failed`) ili `NetworkError` bez statusa
+(`isTransientWriteError`) – ponavlja se jednom posle `WRITE_RETRY_DELAY_MS = 500 ms`
+(`SyncOptions.writeRetryDelayMs` za testove). Ako padne i drugi put (ma kojom greškom), red se preskače
+i broji u `WriteTally.unwritten`; posao se zatvara kao `ok` sa upozorenjem „N redova nije upisano u
+bazu“ (frontend „Delimično“; sledeća sinhronizacija te redove piše ponovo jer su id-jevi deterministički).
+**Ispad baze nije „Delimično“**: ako nijedan red nije upisan, ili je neupisanih više nego upisanih,
+`assertWritesAccepted` obara posao u `error` sa porukom „Baza nije prihvatila upise: N redova nije
+upisano u bazu“ (upozorenje ostaje u `warnings`), pa frontend zadržava prethodnu uspešnu sinhronizaciju
+kao „poslednju“, merač svežine se ne resetuje, a praznina u snimcima se ne tumači kao „SEPA kasni“.
+Greška koja nije prolazna (400, 409, GraphQL odbijanje ulaza, „SQL timeout“, programska `TypeError` –
+`TypeError` je prolazna samo sa mrežnim tekstom kao „fetch failed“) se baca dalje i obara posao u `error`
+kao i ranije. Pre ovoga je jedna 429/5xx među ~1.300 mutacija obarala ceo posao.
 
 ### 4.2 `runBackfill(ctx, day)` – `backfillDay`
 
@@ -210,8 +238,9 @@ fajla, pa se izmena potpisa funkcije vidi kao greška tipa na svakom pozivu.
 2. **Prozor dana.** `dayUtcRange(day)` daje `[lokalna ponoć, sledeća lokalna ponoć)` u UTC; radi i za
    dane sa 23 ili 25 sati (promena letnjeg/zimskog vremena).
 3. Isti koraci kao u sinhronizaciji za stanice i merenja (`SyncRun.kind = 'backfill'`, isti vremenski
-   budžet), ali se **ne pišu snimci** i ne deaktiviraju nestale stanice – samo `Station` i `DailyStat`
-   za taj jedan dan (`computeDailyStats(obs, [day])`), sa istim pravilom o broju sati.
+   budžet, isti ponovni pokušaj upisa), ali se **ne pišu snimci** i ne deaktiviraju nestale stanice –
+   samo `Station` i `DailyStat` za taj jedan dan (`computeDailyStats(obs, [day])`), sa istim pravilom o
+   broju sati.
 4. `message` je `Dan YYYY-MM-DD` ili upozorenja.
 
 Jedan poziv za 30 dana ne bi stao u limit funkcije, pa frontend zove `backfillDay` dan po dan (§4.4).
@@ -224,23 +253,36 @@ Jedan poziv za 30 dana ne bi stao u limit funkcije, pa frontend zove `backfillDa
 
 ### 4.4 Pokrivenost istorije i „Dopuni nedostajuće dane“
 
-Računa se u klijentu iz `listNetworkDailyStats(danas − 30)`, bez promene šeme
-(`historyCoverage` u `src/lib/syncRules.ts`, prag dana u `src/lib/coverage.ts`):
+Računa se u klijentu iz dnevne statistike mreže od `danas − 30` (deljeno čitanje `loadNetworkDaily`,
+§7 i §8.2), bez promene šeme (`historyCoverage` u `src/lib/syncRules.ts`, prag dana u `src/lib/coverage.ts`):
 
 - prozor je poslednjih **30 prošlih dana** (danas − 30 … juče); današnji dan se ne računa;
 - **dan stanice je potpun** kad bar jedan polutant ima ≥ `minCoveredHours(day)` satnih merenja – 75 %
   sati lokalnog dana: 18 od 24 h, 18 od 23 h, 19 od 25 h (isto pravilo kao „pokriven dan“ na Trendovima);
 - **dan mreže je potpun** kad bar `COMPLETE_DAY_SHARE = 80 %` stanica koje u prozoru uopšte imaju redove
   ima potpun dan; **delimičan** kad ima redova ali nije potpun; **nije učitan** kad nema nijednog reda;
-- `oldestIncompleteExpiresInDays` kaže za koliko dana izvor briše najstariji nepotpun dan.
+- **istekao** (`expired`) je prvi dan prozora (danas − 30) koji ima redove, a nije potpun: izvor ga već
+  briše (zadržavanje od 30 dana klizi po satu), pa ga dopuna ne može upotpuniti. Nije u `incomplete`
+  (ne broji se u „Dopuni nedostajuće dane (N)“ ni u plan dopune) ni u `completeDays`; stoji u
+  `HistoryCoverage.expired` (najviše jedan dan). Prvi dan **bez ijednog** reda ostaje `missing` – ono što
+  izvor još čuva može da se učita danas; delimičan dan koji nije rubni ostaje `partial`;
+- `oldestIncompleteExpiresInDays` kaže za koliko dana izvor briše najstariji nepotpun dan koji još može
+  da se dopuni (0 = danas je poslednji dan).
 
-Stranica Sinhronizacija prikazuje „Istorija u bazi · 27/30 dana“, traku od 30 dana, rečenicu o rupama
-(„Nedostaju 13.–14. 09.; delimičan 01. 10.“) i rok izvora. `useSync.startBackfill` (dugme
-„Učitaj istoriju (30 dana)“ na praznoj bazi, inače „Dopuni nedostajuće dane (N)“) prvo izračuna
-pokrivenost, pa zove `backfillDay` **samo za dane koji nisu potpuni, od najstarijeg**. Zaustavljanje
-važi posle tekućeg dana; sledeće pokretanje preskače potpune dane, pa zaista nastavlja. Petlja radi u
-kartici pregledača (oko minut po danu), pa na telefonu piše „Držite ekran uključen“. Trendovi i
-kalendar dan bez ijednog reda u bazi označavaju kao „nije učitan“, a ne kao „nema merenja“.
+Stranica Sinhronizacija prikazuje „Istorija u bazi · 27/30 dana“, traku od 30 dana (istekao dan: siva
+šrafura, „istekao“ u legendi samo kad takav dan postoji), rečenicu o rupama („Nedostaju 13.–14. 09.;
+delimičan 01. 10.; istekao 07. 09. – izvor ga već briše“; kad nema šta da se dopuni: „Svih 29 dana koje
+izvor još čuva je u bazi; …“) i rok izvora. `useSync.startBackfill` (dugme „Učitaj istoriju (30 dana)“
+na praznoj bazi, inače „Dopuni nedostajuće dane (N)“, a „Istorija je potpuna“ kad je `incomplete`
+prazan) prvo izračuna pokrivenost iz istog deljenog čitanja, pa zove `backfillDay` **samo za dane koji
+nisu potpuni, od najstarijeg**. Zaustavljanje važi posle tekućeg dana; sledeće pokretanje preskače
+potpune dane, pa zaista nastavlja. Petlja radi u kartici pregledača, pa na telefonu piše „Držite ekran
+uključen“; procena trajanja („oko 40 s po danu, ukupno oko 20 min za 30 dana“, `backfillEtaText` u
+`runModel.ts`) je prosek izmerenih dana istorije iz dnevnika, bez njih `avgSyncMs × 24 / 72`, a bez
+ijednog merenja „obično ispod minuta po danu“ – nikad obećanje. Ako čitanje pokrivenosti padne, traka
+pokazuje naslov „Pokrivenost istorije nije učitana“, savet iz `describeDataError` (§8.4), sirovu poruku
+pod „Detalji“ i dugme „Pokušaj ponovo“ (sveže čitanje mimo keša). Trendovi i kalendar dan bez ijednog
+reda u bazi označavaju kao „nije učitan“, a ne kao „nema merenja“.
 
 ## 5. Šema identifikatora (`rayfin/functions/src/ids.ts`)
 
@@ -276,7 +318,7 @@ na serveru.
   sinhronizacija prepisuje istinitim vrednostima:
   - redove `Station` svih stanica koje API vraća kao aktivne;
   - `StationSnapshot` stanica koje imaju merenja u prozoru;
-  - `DailyStat` dana koje prozor dodiruje – za 36 h to su **2–3 poslednja lokalna dana** (istorija
+  - `DailyStat` dana koje prozor dodiruje – za 72 h to su **3–4 poslednja lokalna dana** (istorija
     `backfillDay` isto za jedan dan u poslednjih 30).
 
   Ne ispravlja: `DailyStat` starije od tog prozora (a stariji od 30 dana nikad više, jer ih izvor nema),
@@ -307,19 +349,20 @@ na serveru.
 
 ## 7. Budžet performansi
 
-Pretpostavke: oko **60 aktivnih stanica × 5 polutanata**, satne vrednosti.
+Pretpostavke: **87 aktivnih stanica** (stanje 8. 10. 2026.) × do 5 polutanata, satne vrednosti, prozor
+72 h (3–4 lokalna dana). Stanice ne mere sve polutante, pa su brojevi redova gornje granice.
 
 | Korak | Količina | Paralelnost / limiti |
 | --- | --- | --- |
 | Poziv `/stations` | 1 HTTP zahtev | 20 s timeout, 2 ponovna pokušaja |
-| Pozivi `/observations` | ~60 zahteva (jedan po stanici) | 6 paralelno |
-| Upis `Station` (sa `lastObservationAt`) + deaktivacija nestalih | ~60 + retko | 8 paralelno |
-| Upis `StationSnapshot` | ~60 | 8 paralelno |
-| Upis `DailyStat` (36 h → 2–3 lokalna dana) | ~60 × 5 × 2–3 ≈ 600–900 | 8 paralelno |
-| Provera postojanja (paketi od 100 id-jeva) | ~10 upita | pre upisa |
+| Pozivi `/observations` | 87 zahteva (jedan po stanici) | 6 paralelno |
+| Upis `Station` (sa `lastObservationAt`) + deaktivacija nestalih | 87 + retko | 8 paralelno, 1 ponovni pokušaj |
+| Upis `StationSnapshot` | ≤ 87 | 8 paralelno, 1 ponovni pokušaj |
+| Upis `DailyStat` (72 h → 3–4 lokalna dana) | ≤ 87 × 5 × 3–4 ≈ 1.300–1.750 | 8 paralelno, 1 ponovni pokušaj |
+| Provera postojanja (samo `eq`: stanice, aktivne stanice i snimci po jednom upitu, `DailyStat` jedan upit po danu u strani od 5.000) | ~6–7 upita | pre upisa |
 | Provera posla u toku | 1 upit (≤ 20 `running` redova) | pre `SyncRun` reda |
-| **Ukupno `syncAirQuality(36)`** | ~60 HTTP + ~750–1050 GraphQL mutacija | tipično **1–2 min** (procena, nije izmereno na tenantu) |
-| **`backfillDay`** | ~60 HTTP + ~60 + ~300 mutacija | znatno kraće od limita |
+| **Ukupno `syncAirQuality(72)`** | 88 HTTP + ≈ 1.500–1.950 GraphQL zahteva | **izmereno 8. 10. 2026. (prva verzija, 36 h): ~12 s, 18.382 merenja, 1.303 reda**; 72 h ≈ 1,5× upisa – proveriti posle sledeće sinhronizacije |
+| **`backfillDay`** | 88 HTTP + 87 + ≤ 435 mutacija | kraće od sinhronizacije; UI prikazuje izmereni prosek po danu, bez merenja „ispod minuta“ |
 
 **Vremenski budžet.** Fabric host prekida poziv funkcije na **250 s** (Rayfin klijent seče `timeoutMs`
 na tu vrednost; frontend čeka 240 s). Jedna spora stanica može da potroši ~63 s (3 × 20 s + pauze), pa
@@ -329,12 +372,21 @@ vremenski limit“, posao se zatvara kao `ok` („Delimično“) i upisuje sve �
 upise. Napušten `running` red (host je ipak prekinuo funkciju) posle 5 min više ne blokira nikoga.
 
 Frontend: `listStations`/`listSnapshots` su jedna strana `.first(1000)` (podrazumevana strana GraphQL
-API-ja je 100 redova, pa se uvek zadaje `.first(n)`); `listDailyStats` i `listNetworkDailyStats` idu kroz
-`.executePaginated()` + `.after(endCursor)` sa stranom od 1000 i osiguračem od 500 strana. `DailyStat`
-raste ~300 redova dnevno (~110 000 godišnje); mrežni trend za 30 dana je ~9 000 redova = 9 strana.
-Konstante su `WRITE_CONCURRENCY` (sync.ts), `concurrency` (kosavaClient.ts), `PAGE_SIZE`,
-`SINGLE_PAGE`, `FUNCTION_TIMEOUT_MS` (RayfinDataService.ts), `FETCH_START_CUTOFF_MS`,
-`FETCH_DEADLINE_MS`, `RUNNING_GRACE_MS` (sync.ts).
+API-ja je 100 redova, pa se uvek zadaje `.first(n)`); `listDailyStats` (jedna stanica, `PAGE_SIZE = 1000`)
+i `listNetworkDailyStats` (cela mreža, `NETWORK_PAGE_SIZE = 5000`) idu kroz `.executePaginated()` +
+`.after(endCursor)` sa osiguračem od 500 strana. `DailyStat` raste do ~435 redova dnevno (87 × 5; stvarno
+manje), tj. do ~160.000 godišnje; dnevna statistika mreže za 30 dana je ~11.000–13.000 redova = **3
+strane** od 5.000 (sa 1.000 bi bilo 12 uzastopnih zahteva). To čitanje je **jedno po verziji podataka**:
+`AtmosferaProvider.loadNetworkDaily(fromDay, { fresh })` kešira obećanje po ključu
+`${dataVersion}|${fromDay}` (unosi starije verzije se brišu pri prvom zahtevu nove, odbijeno obećanje se
+ne pamti, `fresh` zaobilazi keš) i dele ga Trendovi (`useNetworkDaily`), pokrivenost istorije
+(`useHistoryCoverage`) i planiranje dopune (`useSync.startBackfill`) – svi traže isti prvi dan
+(`danas − 30`), pa Sinhronizacija i Trendovi zajedno koštaju jedno čitanje po `dataVersion`;
+„Pokušaj ponovo“ (`useAsyncData.reload`) čita mimo keša. Brojevi strana i redova nisu mereni na
+tenantu – izvedeni su iz koda i broja stanica. Konstante su `WRITE_CONCURRENCY`, `WRITE_RETRY_DELAY_MS`,
+`DAY_PAGE`, `FETCH_START_CUTOFF_MS`, `FETCH_DEADLINE_MS`, `RUNNING_GRACE_MS` (sync.ts), `concurrency`
+(kosavaClient.ts), `PAGE_SIZE`, `NETWORK_PAGE_SIZE`, `SINGLE_PAGE`, `FUNCTION_TIMEOUT_MS`
+(RayfinDataService.ts).
 
 ## 8. Frontend: ljuska, stranice, stanje, podaci i prijava
 
@@ -382,29 +434,51 @@ Konstante su `WRITE_CONCURRENCY` (sync.ts), `concurrency` (kosavaClient.ts), `PA
   zastarele stanice nigde ne ulaze u stanje mreže. Definicije svih brojeva su u
   [IZVOR-PODATAKA.md § 5](IZVOR-PODATAKA.md#5-definicije-pokazatelja).
 - Osvežavanje (pravila u `src/lib/syncRules.ts`):
-  - **automatski** (samo `rayfin`): `shouldAutoSync` – poslednja ispravna uspešna sinhronizacija vrste
-    `sync` je starija od `STALE_MINUTES = 65` (ili je nema) i nema ispravnog `running` reda mlađeg od
-    `RUNNING_GRACE_MINUTES = 5`. Proverava se jednom po učitavanju podataka: pri otvaranju i posle
-    svakog tihog ponovnog učitavanja;
+  - **automatski** (samo `rayfin`): `shouldAutoSync(lastSync, runs, now, newestObservedAt)` – nema
+    ispravnog `running` reda mlađeg od `RUNNING_GRACE_MINUTES = 5` i važi bar jedno: poslednja ispravna
+    uspešna sinhronizacija vrste `sync` je starija od `STALE_MINUTES = 65` (ili je nema), ILI
+    `nextHourExpected` – **sledeći** sat posle najnovijeg u bazi (početak najnovijeg + 2 h) završio se
+    pre više od `EXPECTED_LAG_MINUTES = 20`, pa ga je SEPA po očekivanju već objavila (u bazi je 23–00 h
+    → 00–01 h se očekuje od 01:20; dok je u bazi 00–01 h, sledeći se očekuje tek od 02:20), i poslednja
+    sinhronizacija je starija od `MIN_GAP_MINUTES = 20`. Kad SEPA objavljuje redovno, grana daje ~1
+    posao po satu (24 dnevno po otvorenoj kartici, svaki sa novim satom), ne jedan po `MIN_GAP`. Bez `newestObservedAt` (prazna baza) važi samo pravilo od 65 min. Oba broja
+    su **pretpostavke o kašnjenju SEPA** (konstante u `syncRules.ts`): treba ih ponovo izmeriti na živoj
+    stavci iz redova `SyncRun` (`windowTo` prema najnovijem `observedAt` koji je posao doneo; jedini
+    uzorak 8. 10. 2026.: sat 00–01 h dostupan u 01:28) – manji `EXPECTED_LAG` bi pokretao poslove bez
+    novih sati, manji `MIN_GAP` bi trošio izvor i kapacitet dok SEPA kasni. Proverava se jednom po
+    učitavanju podataka: pri otvaranju i posle svakog tihog ponovnog učitavanja (`autoSyncTried`), pa
+    dok SEPA kasni jedna kartica sinhronizuje najviše jednom u 20 min (u praksi ~24 min uz tiho čitanje na
+    12 min) umesto na 65. Heroj Sinhronizacije ispisuje pravilo iz istih konstanti; merač svežine
+    prikazuje samo prag od 65 min;
   - **tiho ponovno učitavanje**: kartica skrivena duže od `RESUME_RELOAD_MS` (10 min) pri povratku i na
     `VISIBLE_RELOAD_MS` (12 min) dok je vidljiva; neuspeh ostavlja prikaz i kaže „Osvežavanje nije
     uspelo – prikazani su podaci od HH:MM“;
   - **„Osveži“** (gornja traka, paleta): `refreshDecision` – ako `remoteRunOf` nađe posao druge sesije,
     ne pokreće novi („Sinhronizacija je već u toku (druga sesija)“); ako je poslednja uspešna mlađa od
-    `RECENT_SYNC_MINUTES = 15`, samo ponovo čita bazu; inače `runSync(36)`. **„Osveži sada“** na
-    stranici Sinhronizacija uvek pokreće posao; server ga odbija ako druga sinhronizacija radi (§4.1);
+    `RECENT_SYNC_MINUTES = 15`, samo ponovo čita bazu; inače `runSync(SYNC_HOURS_BACK = 72)`.
+    **„Osveži sada“** na stranici Sinhronizacija uvek pokreće posao; server ga odbija ako druga
+    sinhronizacija radi (§4.1);
   - dok druga sesija radi, `REMOTE_POLL_MS = 25 s` tiho učitavanje i jedno tik pred istek tolerancije;
   - `useSync` ne dozvoljava dva posla u istoj sesiji. „Osveženo pre …“ dolazi samo iz ispravne
     `latestSuccessfulSync` (`pickLastSuccessfulSync`); neispravni redovi dnevnika (§2, `SyncRun`) se
     nigde ne računaju. `dataVersion` raste posle svakog posla i posle tihog čitanja (praćenje druge
     sesije, povratak kartice, periodično) koje donese novu uspešnu sinhronizaciju, pa se dnevna
-    statistika ponovo učitava. Neuspelo tiho čitanje ne pokreće automatsku sinhronizaciju.
+    statistika ponovo učitava – kroz `loadNetworkDaily`, čiji se identitet menja sa `dataVersion` (jedno
+    čitanje po verziji, §7). Neuspelo tiho čitanje ne pokreće automatsku sinhronizaciju.
 - Uspešna sinhronizacija posle koje najnoviji sat u bazi i dalje nije „uživo“ ne javlja „Podaci su
   osveženi“, nego „Sinhronizacija je uspela, ali SEPA nema novih merenja“ – ili, kad je posao ipak
   doneo novije sate od onih pre posla, „Osveženo – SEPA i dalje kasni“; heroj Sinhronizacije tada
   ima stanje **„SEPA kasni“** (`syncStateOf` u `src/components/sync/runModel.ts`). Posao sa
-  upozorenjima `Stanica N:` ili o roku je „Delimično“ (`runStatus`), sa obaveštenjem „Osveženo
-  delimično: X od Y stanica“.
+  upozorenjima `Stanica N:`, o roku ili o neupisanim redovima je „Delimično“ (`runStatus`), sa
+  obaveštenjem „Osveženo delimično: X od Y stanica“ ili „Osveženo delimično: 3 reda nisu upisana u bazu“;
+  dnevnik uz neupisane redove piše „… – prolazna greška baze; sledeća sinhronizacija ih piše ponovo“.
+- **Trajanje u tekstu** (`durationExpectation`, `expectedDurationText`, `backfillEtaText` u
+  `runModel.ts`): „obično oko 12 s · limit 240 s“ je prosek uspešnih sinhronizacija iz dnevnika (10
+  najnovijih, inače poslednja uspešna iz zasebnog upita), grubo zaokružen (`roughDuration`: sekunde, do
+  5 min na 10 s, zatim na minut); bez ijednog merenja „ispod minuta“. Isti izvor koriste heroj, dugmad,
+  obaveštenje i prazan ekran – ništa ne obećava minute koje podaci ne potvrđuju. Trake trajanja u
+  dnevniku su u razmeri najdužeg prikazanog posla, najmanje 60 s (`durationScaleMs`); žuto tek iznad
+  75 % limita, greška crveno, napušten posao puna šrafura.
 - Svežina stanica: `buildStationViews` označava stanicu kao zastarelu (`stale`) kad je njen snimak
   stariji od `STALE_HOURS = 6` sati ili je stanica `active = false`. Takve stanice ne ulaze u KPI,
   medijane, matrice ni „najlošiju“ stanicu, na mapi i u tabeli su sive, a detalj pokazuje vreme
@@ -413,8 +487,10 @@ Konstante su `WRITE_CONCURRENCY` (sync.ts), `concurrency` (kosavaClient.ts), `PA
   istorija ostaje u Trendovima.
 - **„Uživo“** (`liveStatus` u `src/lib/stations.ts`): najnoviji sat je početak satnog intervala
   (`time_start_utc`) i prikazuje se kao interval („16–17 h“), sa datumom kad nije današnji, i uvek sa
-  starošću („pre 2 h“). „Uživo“ i pulsirajuća tačka samo dok se interval završio pre najviše
-  `LIVE_HOURS = 3` sata; inače neutralno „Poslednji sat 06. 10. 16–17 h · pre 9 h“. Čip u ljusci i
+  starošću od **kraja** intervala (`ageText`: sat 00–01 h u 01:28 je „pre 28 min“, ne „pre 1 h“; isto u
+  čipu ljuske, heroju Pregleda i pločici „Najnoviji sat u bazi“). „Uživo“ i pulsirajuća tačka samo dok
+  se interval završio pre najviše `LIVE_HOURS = 3` sata; inače neutralno „Poslednji sat 06. 10. 16–17 h ·
+  pre 9 h“. Čip u ljusci i
   stanje Sinhronizacije koriste najnoviji sat aktivnih stanica bez obzira na svežinu
   (`newestObservedAt`), heroj Pregleda najnoviji sat svežih stanica opsega (bez njih – aktivnih).
 
@@ -429,6 +505,13 @@ Konstante su `WRITE_CONCURRENCY` (sync.ts), `concurrency` (kosavaClient.ts), `PA
 - `backdrop-filter` samo na trakama ljuske, herojima i prekrivačima (paleta, list, tooltip), ne na
   svakoj kartici. U CSS-u se piše samo `backdrop-filter` – Lightning CSS sam dodaje `-webkit-` prefiks
   (ručni par se spajao u verziju koju Chromium ne čita).
+- Brojači (`src/components/fx/CountUp.tsx`) pri prvom prikazu odmah pokazuju vrednost – nema odbrojavanja
+  od nule na Pregledu ni u KPI pločicama; animira se samo kasnija promena, od prethodne vrednosti, najviše
+  `COUNT_UP_MAX_MS = 500 ms`. `from` je izričit izbor za brojače napretka na Sinhronizaciji.
+- Donja granica veličine slova na telefonu: 12 px za HTML tekst (sitne oznake 11 px tek od 640 px), 11 px
+  za oznake osa, mreže i sati u SVG-u (`tick-label` u `src/main.css`: mono, tabularne cifre, 11 px ispod
+  640 px, 10 px od 640 px). Dogovoreni izuzeci na 11 px: procenti u prstenovima KPI, `CategoryChip
+  size="sm"`, natpisi donje navigacije.
 - `prefers-reduced-motion: reduce`: globalni blok u `src/main.css` gasi animacije i prelaze, a komponente
   preko `useReducedMotion` crtaju jedan statičan kadar platna, brojače postavljaju odmah na konačnu
   vrednost, pokretnu traku pretvaraju u red za skrolovanje i ne koriste View Transitions. Strana je
@@ -453,6 +536,15 @@ Konstante su `WRITE_CONCURRENCY` (sync.ts), `concurrency` (kosavaClient.ts), `PA
   dobija sortiranjem `day desc` i prekidom čitanja čim strana padne ispod traženog dana. Iz istog
   razloga funkcije proveravaju postojanje redova samo `eq` upitima (sve stanice i snimci odjednom,
   `DailyStat` po danu), bez filtera `in`.
+- Greške (`src/lib/errors.ts`): istekla sesija se prepoznaje po HTTP statusu 401/403 sa objekta greške
+  (`status`, `statusCode`, `response.status`, ugnežđeni `cause` – `httpStatusOf`) pre bilo kakvog teksta,
+  pa „Stanica 401: HTTP 500 za …station_id=401“ nije sesija, a tekstualni obrasci su samo oblici statusa
+  („HTTP 401“, „401 Unauthorized“, „access token has expired“). Nepoznata greška čitanja dobija ljudski
+  naslov „Greška pri čitanju baze“ i savet „Pokušajte ponovo; ako se ponavlja, javite vlasniku.“, rok
+  „Baza nije odgovorila u roku“; sirova poruka (npr. GraphQL `gte`) ostaje u `describeDataError().detail`
+  → `useAsyncData.errorDetail` / `useDashboardData.errorDetail` → sklopivo „Detalji“ u svakoj traci greške
+  (`ErrorBanner detail`: ljuska „Podaci nisu učitani“, trend mreže, kalendar, dnevna statistika stanice;
+  `HistoryStrip` pokrivenost), nikad kao glavni tekst (`dataErrorMessage`).
 - Entiteti iz `rayfin/data` se u frontend uvoze **samo kao tipovi** (`import type`):
   `@vitejs/plugin-react-swc` ne parsira TC39 dekoratore, pa ESLint pravilo `no-restricted-imports` u
   `eslint.config.js` zabranjuje vrednosne uvoze iz `src/**`.
@@ -477,6 +569,28 @@ Konstante su `WRITE_CONCURRENCY` (sync.ts), `concurrency` (kosavaClient.ts), `PA
   `STALE_HOURS`) iz `src/lib/stations.ts` – nema drugog izvora istine. Sadrži i pravilo najlošijeg
   polutanta, medijane i okruge i napomenu o preliminarnim podacima.
 
+### 8.6 Mapa: razmak markera i traka izabrane stanice
+
+- Razmak markera (`src/components/map/markers.ts`) se izvodi iz **piksela**, ne iz viewBox jedinica:
+  `markerSpacing(vb.w, izmerenaŠirina, dotPx)` = (tačka 12 px, u kompaktnom pregledu 9 px, + 2 px) ×
+  vb.w / širina – korak od 14 px bez obzira na veličinu mape (≈ 14 km na mapi od ~343 px na desktopu,
+  ≈ 15 km na telefonu); `MIN_MARKER_DISTANCE = 30` jedinica važi samo za prvi, neizmeren kadar.
+  Razdvajanje je determinističko: odbijanje parova + 120 krugova „opruge“ ka pravom položaju
+  (`SPRING_ROUNDS`, `SPRING_PULL`); učestvuju samo tačke sa susedom bliže od 3 koraka. Legenda kaže
+  najveći pomak („Preklopljene stanice su razmaknute (do N km)“, `spacingNote`, zaokruženo nagore;
+  izostavlja se kad se ništa nije pomerilo), a tooltip pomerene stanice „Tačka je pomerena ≈ X km da se
+  ne preklapa sa susednom“ (od 0,5 km). Granica pristupa: devet stanica u krugu od 12 km (`?demo=beograd`)
+  na mapi od ~343 px traži pomake do ~19–21 km – manje ne može bez zumiranja ili grupisanja, koje nije
+  deo ove verzije.
+- Na telefonu (< 1024 px) traka izabrane stanice (`.map-strip--fixed` u `src/styles/mapa.css`) je
+  fiksirana iznad donje navigacije (`--bottomnav-h`, meri je `AppShell` i uključuje
+  `env(safe-area-inset-bottom)`), vidljiva samo dok je panel detalja ispod ekrana (IntersectionObserver u
+  `src/components/map/selectedStrip.ts`), sa dugmetom „Detalji“ visine 44 px; dok postoji, `MapView`
+  objavljuje `--map-strip-h` na `<html>`, pa se plutajuće obaveštenje (`SyncToast`) slaže iznad nje. Od
+  1024 do 1280 px traka je u toku ispod mape (`lg:sticky`), od 1280 px je nema (detalj je pored mape).
+- Stanice bez koordinata dobijaju položaj iz `src/data/opstine-okrug.json` (opština → okrug i približne
+  koordinate; proverava se bez obzira na velika/mala slova); novi nazivi opština iz API-ja se dodaju tamo.
+
 ## 9. Zašto nema scheduler-a i kako proširiti
 
 Rayfin CLI/SDK 1.36.2 **ne nudi zakazano pokretanje funkcija** (u dokumentaciji nema timer trigera ni
@@ -485,7 +599,7 @@ izabrano **osvežavanje pri otvaranju** uz ručno dugme. To znači: podaci su sv
 aplikaciju; dan koji niko ne dopuni dok ga izvor čuva (30 dana) trajno nedostaje. Ublažavanje u ovoj
 verziji je vidljiva pokrivenost istorije i „Dopuni nedostajuće dane“ (§4.4); stranica Sinhronizacija
 kaže da bez otvaranja aplikacije nema sinhronizacije.
-Kad zakazivanje postane dostupno, dovoljno je pozivati `syncAirQuality({ hoursBack: 36 })` jednom na sat
+Kad zakazivanje postane dostupno, dovoljno je pozivati `syncAirQuality({ hoursBack: 72 })` jednom na sat
 – funkcija je idempotentna, ne zavisi od UI-ja i sama odbija drugi posao dok jedan radi. Alternativa van
 Fabric-a (spoljni servis koji poziva funkciju) zahtevala bi Fabric identitet za taj servis i nije deo
 ove verzije.
@@ -523,7 +637,7 @@ Jedno mesto: `rayfin/functions/src/shared/aqi.ts` – `THRESHOLDS_1H` (vrednosti
 (nazivi, saveti, boje). Isti modul koriste server i browser, pa nema dva izvora istine. Posle promene:
 ažurirati `tests/shared/aqi.test.ts`, pa `npx rayfin up` (funkcije i frontend). Sačuvane kolone
 `StationSnapshot.category` i `DailyStat.categoryMax` odražavaju stare pragove dok se redovi ne prepišu:
-„Osveži“ ispravlja snimke i poslednja 2–3 dana. „Dopuni nedostajuće dane“ učitava samo nepotpune dane,
+„Osveži“ ispravlja snimke i poslednja 3–4 dana. „Dopuni nedostajuće dane“ učitava samo nepotpune dane,
 pa potpuni dani i sva starija istorija zadržavaju stare kategorije (sirove vrednosti `maxValue` ostaju
 tačne). Ponovni proračun poslednjih 30 dana traži `backfillDay` za svaki dan (u kodu
 `startBackfill({ days })`; dugmeta za to nema).
@@ -539,7 +653,10 @@ izazove gubitak podataka. Šemu nikad ne menjati direktno u SQL bazi (kod je izv
 `npm test` (vitest, bez mreže) pokriva `@shared/aqi`, `@shared/time`, `@shared/kosava`,
 `@shared/aggregate`, `@shared/syncNotes`, `ids.ts`, `kosavaClient.ts` i `sync.ts` (lažni
 `ctx.getDataClient()` u memoriji i lažni `fetch`; uključujući proveru posla u toku, vremenski budžet sa
-zakasnelim odgovorima i pravilo o broju sati), pravila sinhronizacije i pokrivenosti
-(`tests/frontend/syncRules.test.ts`) i frontend module (`src/**/*.test.ts(x)`). Ostale provere: `npm run typecheck`, `npm run lint`, `npm run build:demo`,
-`npm run functions:build`, `npm run typegen` (idempotentno), `npm run screenshots`. CI radni tok je u
-`.github/workflows/ci.yml`.
+zakasnelim odgovorima, pravilo o broju sati i ponovni pokušaj upisa), pravila sinhronizacije,
+pokrivenosti (uključujući istekao rubni dan) i grešaka (`tests/frontend/syncRules.test.ts`,
+`tests/frontend/errors.test.ts`) i frontend module (`src/**/*.test.ts(x)`: naslov sa dva stanja, razmak
+markera, brojači, scenariji demo podataka …). Ostale provere: `npm run typecheck`, `npm run lint`,
+`npm run build:demo`, `npm run functions:build`, `npm run typegen` (idempotentno), `npm run screenshots`.
+E2E provere demo build-a u Chromium-u su u `scripts/e2e.mjs` (`npm run e2e` posle `npm run build:demo`;
+Playwright nije deo CI-ja). CI radni tok je u `.github/workflows/ci.yml`.

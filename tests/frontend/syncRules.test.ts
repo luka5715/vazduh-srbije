@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { DailyStatRecord, SyncRunRecord } from '@shared/contracts';
-import { SYNC_ALREADY_RUNNING } from '@shared/syncNotes';
 import { addDays } from '@shared/time';
-
-import { dataErrorMessage, describeDataError, describeSyncError } from '@/lib/errors';
 
 import {
   coverageGapsText,
+  EXPECTED_LAG_MINUTES,
   formatDayRanges,
   hasActiveRun,
   historyCoverage,
@@ -15,11 +13,14 @@ import {
   isRemoteRunActive,
   isRunAbandoned,
   isRunInvalid,
+  MIN_GAP_MINUTES,
+  nextHourExpected,
   pickLastSuccessfulSync,
   refreshDecision,
   remoteRunOf,
   RUNNING_GRACE_MINUTES,
   shouldAutoSync,
+  STALE_MINUTES,
   validRuns,
 } from '@/lib/syncRules';
 
@@ -126,6 +127,116 @@ describe('automatsko osvežavanje i dugme „Osveži“', () => {
     expect(shouldAutoSync(lastSync(90), [run({ minutesAgo: RUNNING_GRACE_MINUTES + 1 })], NOW)).toBe(true);
   });
 
+  describe('sat koji je SEPA već objavila (newestObservedAt)', () => {
+    // NOW = 09:30Z. Najnoviji interval u bazi počinje pre `minutesAgoStart` min; SLEDEĆI interval
+    // se završava 2 h posle tog početka, a njegova objava se očekuje EXPECTED_LAG posle toga.
+    const newest = (minutesAgoStart: number) => new Date(NOW.getTime() - minutesAgoStart * MINUTE);
+
+    it('pretpostavke su imenovane na jednom mestu i konzervativne', () => {
+      expect(EXPECTED_LAG_MINUTES).toBe(20);
+      expect(MIN_GAP_MINUTES).toBe(20);
+      expect(MIN_GAP_MINUTES).toBeLessThan(STALE_MINUTES);
+    });
+
+    it('nextHourExpected: tačno kad se SLEDEĆI interval završio pre više od EXPECTED_LAG', () => {
+      // U bazi 07:00–08:00Z (početak pre 150 min): sledeći sat 08–09Z se završio u 09:00Z, objava
+      // očekivana u 09:20Z → NOW 09:30Z je posle.
+      expect(nextHourExpected(newest(150), NOW)).toBe(true);
+      // U bazi 08:00–09:00Z (početak pre 90 min): to je sat koji VEĆ imamo; sledeći (09–10Z) se
+      // završava tek u 10:00Z → ništa novo nema. (Ranija greška: ovde je bilo `true`, pa je pravilo
+      // važilo odmah posle svake sinhronizacije i auto-sync se svodio na tajmer od MIN_GAP.)
+      expect(nextHourExpected(newest(90), NOW)).toBe(false);
+      // Granica: početak pre 140 min → objava sledećeg tačno u 09:30 nije PRE sada (ravno).
+      expect(nextHourExpected(newest(140), NOW)).toBe(false);
+      expect(nextHourExpected(newest(141), NOW)).toBe(true);
+      // Interval 09:00–10:00Z još traje.
+      expect(nextHourExpected(newest(30), NOW)).toBe(false);
+      expect(nextHourExpected(null, NOW)).toBe(false);
+      expect(nextHourExpected(undefined, NOW)).toBe(false);
+      expect(nextHourExpected(new Date('nije datum'), NOW)).toBe(false);
+    });
+
+    it('nextHourExpected: kad SEPA objavljuje redovno, pravilo pokreće ~1 sinhronizaciju po satu, ne svakih MIN_GAP', () => {
+      // Simulacija jedne otvorene kartice tokom 24 h: SEPA objavljuje sat `lagMinutes` posle
+      // njegovog kraja, kartica proverava pravilo pri svakom tihom čitanju (na 12 min, prvo u
+      // `phaseMinutes`). Svaki posao donosi sve sate koje je SEPA do tada objavila; „koristan“ je
+      // posao koji donese nov sat.
+      const simulateDay = (lagMinutes: number, phaseMinutes: number) => {
+        const day0 = new Date('2026-10-08T00:00:00Z').getTime();
+        let lastSyncAt = day0 - 10 * MINUTE;
+        let newestInDb = day0 - 2 * 3_600_000; // u bazi 22–23Z, SEPA je 23–00Z objavila u 00:lag
+        let syncs = 0;
+        let useful = 0;
+        for (let t = day0 + phaseMinutes * MINUTE; t < day0 + 24 * 3_600_000; t += 12 * MINUTE) {
+          if (!shouldAutoSync(new Date(lastSyncAt), [], new Date(t), new Date(newestInDb))) continue;
+          syncs++;
+          lastSyncAt = t;
+          const published = Math.floor((t - lagMinutes * MINUTE) / 3_600_000) * 3_600_000 - 3_600_000;
+          if (published > newestInDb) {
+            useful++;
+            newestInDb = published;
+          }
+        }
+        return { syncs, useful };
+      };
+      // SEPA objavi pre pretpostavljenog roka (EXPECTED_LAG): tačno 24 posla, svaki sa novim satom,
+      // bez obzira na fazu provera. (Ranija formula je davala ~59 poslova, od kojih 35 bez novog sata.)
+      expect(simulateDay(15, 0)).toEqual({ syncs: 24, useful: 24 });
+      expect(simulateDay(15, 5)).toEqual({ syncs: 24, useful: 24 });
+      // Živi uzorak (28 min, kasnije od pretpostavke): svaki sat ipak stigne; kad provera padne
+      // između očekivane i stvarne objave, MIN_GAP ograničava višak na najviše jedan posao po satu.
+      expect(simulateDay(28, 5)).toEqual({ syncs: 24, useful: 24 });
+      const late = simulateDay(28, 0);
+      expect(late.useful).toBe(24);
+      expect(late.syncs).toBeLessThanOrEqual(48);
+    });
+
+    it('grana 2: očekivan nov sat + poslednja sinhronizacija starija od MIN_GAP → da (živi slučaj: 00–01 h u 01:28)', () => {
+      const live = new Date('2026-10-08T01:28:00+02:00');
+      // U bazi je 23–00 h: sledeći sat 00–01 h se završio u 01:00 i očekuje se od 01:20.
+      const hour23 = new Date('2026-10-07T23:00:00+02:00');
+      const hour00 = new Date('2026-10-08T00:00:00+02:00');
+      const synced = (minutesAgo: number) => new Date(live.getTime() - minutesAgo * MINUTE);
+      // Pravilo od 65 min: sinhronizacija od pre 28 min je „sveža“ → ništa; grana 2: 00–01 h je
+      // objavljen (01:00 + 20 min = 01:20 < 01:28), a 28 min > MIN_GAP → sinhronizuj.
+      expect(shouldAutoSync(synced(28), [], live, hour23)).toBe(true);
+      // Kad je 00–01 h VEĆ u bazi, sledeći (01–02 h) se očekuje tek u 02:20 → ne sinhronizuj.
+      expect(shouldAutoSync(synced(28), [], live, hour00)).toBe(false);
+      // Ispod MIN_GAP (sinhronizovano pre 15 min) → ne, ma koliko sat bio očekivan.
+      expect(shouldAutoSync(synced(15), [], live, hour23)).toBe(false);
+      expect(shouldAutoSync(synced(MIN_GAP_MINUTES), [], live, hour23)).toBe(false);
+      expect(shouldAutoSync(synced(MIN_GAP_MINUTES + 1), [], live, hour23)).toBe(true);
+      // Posao druge sesije blokira i ovu granu.
+      expect(shouldAutoSync(synced(28), [run({ startedAt: synced(1).toISOString() })], live, hour23)).toBe(false);
+    });
+
+    it('grana 2 se ne pali kad sledeći sat još nije očekivan; grana 1 (65 min) važi i tada', () => {
+      // Najnoviji interval 09:00–10:00Z je u toku: nema šta da se preuzme.
+      expect(shouldAutoSync(lastSync(30), [], NOW, newest(30))).toBe(false);
+      expect(shouldAutoSync(lastSync(66), [], NOW, newest(30))).toBe(true);
+      // U bazi 08:20–09:20Z: sledeći sat se završava u 10:20Z, pa ga SEPA sigurno još nije objavila.
+      expect(shouldAutoSync(lastSync(30), [], NOW, newest(70))).toBe(false);
+      // U bazi 07:00–08:00Z: sledeći (08–09Z) se završio pre 30 min > EXPECTED_LAG, ali je poslednja
+      // sinhronizacija mlađa od MIN_GAP → ne; starija od MIN_GAP → da.
+      expect(shouldAutoSync(lastSync(19), [], NOW, newest(150))).toBe(false);
+      expect(shouldAutoSync(lastSync(21), [], NOW, newest(150))).toBe(true);
+    });
+
+    it('bez newestObservedAt (null, prazna baza) važi samo pravilo od 65 min', () => {
+      expect(shouldAutoSync(lastSync(30), [], NOW, null)).toBe(false);
+      expect(shouldAutoSync(lastSync(64), [], NOW, null)).toBe(false);
+      expect(shouldAutoSync(lastSync(66), [], NOW, null)).toBe(true);
+      expect(shouldAutoSync(null, [], NOW, null)).toBe(true);
+    });
+
+    it('najviše jedna automatska sinhronizacija po MIN_GAP: odmah posle posla pravilo kaže ne', () => {
+      // Sinhronizacija upravo završena, ali SEPA i dalje kasni (sat star 5 h) → čeka se MIN_GAP.
+      expect(shouldAutoSync(lastSync(0), [], NOW, newest(5 * 60))).toBe(false);
+      expect(shouldAutoSync(lastSync(19), [], NOW, newest(5 * 60))).toBe(false);
+      expect(shouldAutoSync(lastSync(21), [], NOW, newest(5 * 60))).toBe(true);
+    });
+  });
+
   it('„Osveži“: posao druge sesije → ne pokreće novi; < 15 min → samo čitanje baze; inače sinhronizacija', () => {
     const remote = run({ minutesAgo: 1 });
     expect(refreshDecision(lastSync(5), [remote], NOW)).toEqual({ kind: 'remote', run: remote });
@@ -170,11 +281,39 @@ describe('pokrivenost istorije (historyCoverage)', () => {
     expect(coverage.days.at(-1)?.day).toBe('2026-10-06');
     expect(coverage.stations).toBe(10);
     expect(coverage.completeDays).toBe(26);
-    expect(coverage.incomplete).toEqual(['2026-09-07', '2026-09-27', '2026-10-03', '2026-10-04']);
+    // Rubni dan (danas − 30) sa delom sati je ISTEKAO: izvor ga već briše, dopuna ga ne može
+    // upotpuniti, pa nije u `incomplete` (dugme „Dopuni (N)“ ga ne broji) ni u `completeDays`.
+    expect(coverage.incomplete).toEqual(['2026-09-27', '2026-10-03', '2026-10-04']);
+    expect(coverage.expired).toEqual(['2026-09-07']);
+    expect(coverage.days[0]).toMatchObject({ day: '2026-09-07', status: 'expired', complete: 0, reported: 10 });
     expect(coverage.missing).toEqual(['2026-10-03', '2026-10-04']);
     expect(coverage.days.find((d) => d.day === '2026-09-27')).toMatchObject({ status: 'partial', complete: 5, reported: 10 });
-    expect(coverage.oldestIncompleteExpiresInDays).toBe(0);
-    expect(coverageGapsText(coverage)).toBe('Nedostaju 03.–04. 10.; delimični 07. 09., 27. 09.');
+    // Najstariji dan koji se MOŽE dopuniti (27. 09.) izvor briše za 20 dana.
+    expect(coverage.oldestIncompleteExpiresInDays).toBe(20);
+    expect(coverageGapsText(coverage)).toBe('Nedostaju 03.–04. 10.; delimičan 27. 09.; istekao 07. 09. – izvor ga već briše.');
+  });
+
+  it('istekao rubni dan: samo prvi dan prozora koji već ima redove; prazan prvi dan ostaje „nije učitan“', () => {
+    // Samo rubni dan je delimičan: ništa za dopunu, ali 29/30, ne 30/30.
+    const edgeOnly = historyCoverage(network((daysAgo) => (daysAgo === 30 ? 7 : 24)), TODAY);
+    expect(edgeOnly.incomplete).toEqual([]);
+    expect(edgeOnly.expired).toEqual(['2026-09-07']);
+    expect(edgeOnly.completeDays).toBe(29);
+    expect(edgeOnly.oldestIncompleteExpiresInDays).toBeNull();
+    expect(coverageGapsText(edgeOnly)).toBe('Svih 29 dana koje izvor još čuva je u bazi; istekao 07. 09. – izvor ga već briše.');
+    // Rubni dan bez ijednog reda može (delimično) da se učita još danas → `missing`, ističe za 0 dana.
+    const edgeMissing = historyCoverage(network((daysAgo) => (daysAgo === 30 ? null : 24)), TODAY);
+    expect(edgeMissing.incomplete).toEqual(['2026-09-07']);
+    expect(edgeMissing.expired).toEqual([]);
+    expect(edgeMissing.days[0].status).toBe('missing');
+    expect(edgeMissing.oldestIncompleteExpiresInDays).toBe(0);
+    // Delimičan dan koji NIJE rubni ostaje `partial` (može da se dopuni).
+    const inner = historyCoverage(network((daysAgo) => (daysAgo === 29 ? 7 : 24)), TODAY);
+    expect(inner.incomplete).toEqual(['2026-09-08']);
+    expect(inner.expired).toEqual([]);
+    expect(inner.oldestIncompleteExpiresInDays).toBe(1);
+    // Potpun rubni dan je potpun.
+    expect(historyCoverage(network(() => 24), TODAY).expired).toEqual([]);
   });
 
   it('najbolji polutant stanice odlučuje; prazna baza = svih 30 dana nedostaje', () => {
@@ -208,17 +347,3 @@ describe('pokrivenost istorije (historyCoverage)', () => {
   });
 });
 
-describe('greške čitanja i sinhronizacije', () => {
-  it('401/403 pri čitanju podataka (kartica vraćena posle više sati) daje savet o sesiji', () => {
-    expect(describeDataError(new Error('GraphQL request failed: 401 Unauthorized'))).toMatchObject({ title: 'Sesija nije važeća', known: true });
-    expect(dataErrorMessage('HTTP 403 Forbidden')).toBe('Sesija nije važeća. Odjavite se i prijavite ponovo (u lokalnom razvoju: npx rayfin login).');
-    expect(dataErrorMessage(new TypeError('Failed to fetch'))).toMatch(/^Nema veze sa Rayfin API-jem\./);
-    // Ostalo ostaje sirova poruka.
-    expect(dataErrorMessage('Cannot query field "foo"')).toBe('Cannot query field "foo"');
-  });
-
-  it('odbijen drugi posao i vremenski limit sinhronizacije', () => {
-    expect(describeSyncError(`${SYNC_ALREADY_RUNNING} (pokrenuta pre 2 min u drugoj sesiji).`).title).toBe('Sinhronizacija je već u toku');
-    expect(describeSyncError('Vremenski limit sinhronizacije: https://x/stations').title).toBe('Funkcija nije završila u roku');
-  });
-});

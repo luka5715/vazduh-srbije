@@ -1,14 +1,15 @@
 import { TriangleAlert } from 'lucide-react';
 
-import { demoScenario, LATE_FEED_HOURS } from '@/services/demoScenario';
+import { DEMO_SCENARIO_NOTES, demoScenario } from '@/services/demoScenario';
 
 /**
  * Stalna, neuklonjiva oznaka demo režima – vidi se na svakom ekranu (i na prijavi).
  * Tekst se ne menja; traka nema dugme za zatvaranje. Imenovana sekcija (orijentir „Demo
- * režim“), jer stoji iznad `<main>` i van ostalih orijentira.
+ * režim“), jer stoji iznad `<main>` i van ostalih orijentira. Scenario (`?demo=`) dodaje
+ * svoju napomenu iz `DEMO_SCENARIO_NOTES` (prazna za podrazumevani demo).
  */
 export function DemoBanner() {
-  const scenario = demoScenario();
+  const note = DEMO_SCENARIO_NOTES[demoScenario()];
   return (
     <section
       aria-label="Demo režim"
@@ -20,7 +21,7 @@ export function DemoBanner() {
     >
       <TriangleAlert aria-hidden className="-mt-0.5 mr-1.5 inline size-4 text-warn" />
       DEMO PODACI — ovo nisu stvarna merenja. Pokrenite aplikaciju u Fabric-u za prave podatke SEPA.
-      {scenario === 'late' ? ` Scenario: SEPA kasni ${LATE_FEED_HOURS} h.` : scenario === 'empty' ? ' Scenario: prazna baza.' : ''}
+      {note ? ` ${note}` : ''}
     </section>
   );
 }

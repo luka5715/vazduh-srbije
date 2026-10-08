@@ -29,6 +29,20 @@
   grid-area: text;
 }
 
+/*
+ * Red sočiva ispod rečenice raspodele: visina je rezervisana (dva reda na telefonu, gde se
+ * „Po PM10: …“ prelama; jedan red od 640 px), pa izbor sočiva ne pomera sekcije ispod heroja.
+ */
+.ov-hero__lens {
+  min-height: 40px;
+}
+
+@media (min-width: 640px) {
+  .ov-hero__lens {
+    min-height: 20px;
+  }
+}
+
 .ov-hero__ring {
   grid-area: ring;
   display: flex;

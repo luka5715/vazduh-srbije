@@ -1,3 +1,5 @@
+import type { Ref } from 'react';
+
 import { useAtmosfera } from '@/hooks/useAtmosfera';
 import { cn } from '@/lib/cn';
 
@@ -10,12 +12,15 @@ import { useNavBadges } from './useNavBadges';
  * `env(safe-area-inset-bottom)` i bočne sigurne zone. Sadržaj ima donji razmak (`pb-safe-nav`),
  * pa je ne pokriva. Na položenom telefonu (`short`) traka je zbijena (≈ 48 px).
  * Naziv dugmeta počinje vidljivim natpisom („Sinhr. (sinhronizacija), status: …“).
+ * `ref` meri AppShell (`--bottomnav-h`), da elementi iznad trake (npr. traka izabrane stanice
+ * na Mapi) znaju njenu stvarnu visinu.
  */
-export function BottomNav({ className }: { className?: string }) {
+export function BottomNav({ className, ref }: { className?: string; ref?: Ref<HTMLElement> }) {
   const { view, navigate } = useAtmosfera();
   const badges = useNavBadges();
   return (
     <nav
+      ref={ref}
       aria-label="Stranice"
       className={cn('shell-bar vt-bottomnav fixed inset-x-0 bottom-0 z-40 border-t border-border pb-[env(safe-area-inset-bottom)]', className)}
     >

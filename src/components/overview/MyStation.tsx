@@ -20,9 +20,10 @@ const NO_OKRUG = 'Bez okruga';
  * Izbor moje stanice: nativni `<select>` (na telefonu sistemski birač), aktivne stanice
  * grupisane po okrugu. Uvek prikazuje natpis (`label`), ne izabranu stanicu – izbor odmah
  * postaje moja stanica, a kartica „Moja stanica“ prikazuje koja je. `field-sizing: content`
- * daje širinu natpisa (bez toga je select širok kao najduži naziv stanice).
+ * daje širinu natpisa (bez toga je select širok kao najduži naziv stanice). `tall`: 40 px
+ * ispod 640 px (glavna radnja heroja na telefonu; `touch-target` ne radi na `<select>`).
  */
-export function MyStationPicker({ label, className }: { label: string; className?: string }) {
+export function MyStationPicker({ label, tall = false, className }: { label: string; tall?: boolean; className?: string }) {
   const { views } = useAtmosfera();
   const { setMyStation } = useMyStation(views);
   const groups = useMemo(() => {
@@ -36,7 +37,7 @@ export function MyStationPicker({ label, className }: { label: string; className
   }, [views]);
   if (!groups.length) return null;
   return (
-    <label className={cn('relative inline-flex h-8 max-w-full items-center', className)}>
+    <label className={cn('relative inline-flex max-w-full items-center', tall ? 'h-10 sm:h-8' : 'h-8', className)}>
       <span className="sr-only">Moja stanica – stanica koja se prikazuje prva na Pregledu (pamti se samo u ovom pregledaču)</span>
       <Star aria-hidden className="pointer-events-none absolute left-3 size-3.5 text-muted" />
       <select
@@ -44,7 +45,10 @@ export function MyStationPicker({ label, className }: { label: string; className
         onChange={(event) => {
           if (event.target.value) setMyStation(event.target.value);
         }}
-        className="h-8 max-w-full cursor-pointer appearance-none truncate rounded-full border border-border-strong bg-transparent pl-8 pr-8 text-[13px] font-medium text-ink transition-colors [field-sizing:content] hover:bg-card-2"
+        className={cn(
+          'max-w-full cursor-pointer appearance-none truncate rounded-full border border-border-strong bg-transparent pl-8 pr-8 text-[13px] font-medium text-ink transition-colors [field-sizing:content] hover:bg-card-2',
+          tall ? 'h-10 sm:h-8' : 'h-8',
+        )}
       >
         <option value="">{label}</option>
         {groups.map(([okrug, stations]) => (

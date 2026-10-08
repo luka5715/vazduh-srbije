@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 
 import { CategoryLegend, PARTIAL_HATCH, PARTIAL_OUTLINE } from '@/components/charts/CategoryLegend';
 import { ChartTooltip } from '@/components/charts/ChartTooltip';
-import { columnLabelOffsets, HEAT_GAP as GAP, LABEL_CHAR_PX } from '@/components/charts/heatGridLabels';
+import { columnLabelOffsets, HEAT_GAP as GAP, LABEL_CHAR_PX, LABEL_CHAR_PX_PHONE } from '@/components/charts/heatGridLabels';
 import { catInkVar, DOT_RANK } from '@/components/charts/marks';
 import { useDismissOutside } from '@/components/charts/useTouchInspect';
 import { CategoryDot } from '@/components/ui/Category';
@@ -155,6 +155,9 @@ export function HeatGrid({
   const pointerTypeRef = useRef('mouse');
   const moveFocusRef = useRef(false);
   const coarse = useMediaQuery('(pointer: coarse)');
+  /** Oznake kolona su `tick-label`: 11 px ispod 640 px, 10 px od `sm` – procena širine znaka prati veličinu. */
+  const smUp = useMediaQuery('(min-width: 40rem)', true);
+  const labelCharPx = smUp ? LABEL_CHAR_PX : LABEL_CHAR_PX_PHONE;
 
   const visibleRows = expanded ? rows : rows.slice(0, maxRows);
   const hiddenCount = rows.length - visibleRows.length;
@@ -190,10 +193,10 @@ export function HeatGrid({
   // Oznake kolona: svaka k-ta, poravnato tako da je poslednja (najnovija) uvek označena.
   const labelEvery = useMemo(() => {
     const longest = columns.reduce((max, column) => Math.max(max, column.label.length), 0);
-    const needed = longest * LABEL_CHAR_PX + 8;
+    const needed = longest * labelCharPx + 8;
     return Math.max(1, Math.ceil(needed / (cellWidth + GAP)));
-  }, [columns, cellWidth]);
-  const labelOffsets = useMemo(() => columnLabelOffsets(columns, cellWidth, labelEvery), [columns, cellWidth, labelEvery]);
+  }, [columns, cellWidth, labelCharPx]);
+  const labelOffsets = useMemo(() => columnLabelOffsets(columns, cellWidth, labelEvery, labelCharPx), [columns, cellWidth, labelEvery, labelCharPx]);
 
   const hasPartial = columns.some((column) => column.partial) || rows.some((row) => row.cells.some((cell) => cell.partial));
   const hasCellNotLoaded = rows.some((row) => row.cells.some((cell) => cell.notLoaded));
@@ -375,7 +378,7 @@ export function HeatGrid({
                     {offset !== null ? (
                       <span
                         aria-hidden
-                        className="tnum absolute top-0 whitespace-nowrap font-mono text-[10px] leading-4 text-muted"
+                        className="tick-label absolute top-0 whitespace-nowrap leading-4 text-muted"
                         style={{ left: offset }}
                       >
                         {column.label}

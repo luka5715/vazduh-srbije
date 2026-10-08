@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { dailyStatId, snapshotId, stationId } from '../../rayfin/functions/src/ids';
 import { addDays, dayUtcRange, localDay, localHour, todayLocal } from '../../rayfin/functions/src/shared/time';
-import { SYNC_ALREADY_RUNNING } from '../../rayfin/functions/src/shared/syncNotes';
-import { runBackfill, runSync } from '../../rayfin/functions/src/sync';
+import { summarizeSyncWarnings, SYNC_ALREADY_RUNNING, unwrittenRowsWarning } from '../../rayfin/functions/src/shared/syncNotes';
+import { isTransientWriteError, runBackfill, runSync } from '../../rayfin/functions/src/sync';
 
 import { FakeDataClient, fakeContext, type DailyStatRow, type SyncRunRow } from '../support/fakeDataClient';
 import { createFakeFetch, type RouteHandler } from '../support/fakeFetch';
@@ -65,9 +65,14 @@ function setup(routes: Record<string, RouteHandler> = {}) {
     '/api/v1/observations': observationsRoute(),
     ...routes,
   });
-  // retries: 0 keeps error-path tests free of back-off sleeps.
-  const options = { fetchImpl: fake.fetchImpl, retries: 0 };
+  // retries: 0 keeps error-path tests free of back-off sleeps; the write retry waits 1 ms instead of 500.
+  const options = { fetchImpl: fake.fetchImpl, retries: 0, writeRetryDelayMs: 1 };
   return { data, ctx, fake, options };
+}
+
+/** A transient write failure as the SDK reports it: `NetworkError.status` carries the HTTP status. */
+function transientError(status = 503): Error {
+  return Object.assign(new Error(`HTTP Error ${status}`), { name: 'NetworkError', status });
 }
 
 /** A long API base URL, so that every per-station warning (which quotes the URL) is ~500 chars. */
@@ -257,16 +262,20 @@ describe('runSync', () => {
     expect(data.DailyStat.rows.get(dailyStatId(38, 'PM10', '2026-10-06'))).toMatchObject({ hours: 17, maxValue: 30, minValue: 30 });
   });
 
-  it('clamps hoursBack to [3, 168], rounds it, falls back to 36 for non-numbers and starts at local midnight', async () => {
+  it('clamps hoursBack to [3, 168], rounds it, falls back to 72 for non-numbers and starts at local midnight', async () => {
     // [input, effective hoursBack, window start = local midnight of the day NOW − hoursBack falls on]
+    // The default is 72 h (not 36) so that a weekend gap – Friday 18:00 → Monday 08:00 = 62 h –
+    // heals itself and Friday is written as a whole day; NOW − 72 h = 2026-10-03 17:30 local.
+    const DEFAULT_WINDOW_START = '2026-10-02T22:00:00.000Z';
     const cases: Array<[number, number, string]> = [
       [1, 3, TODAY_MIDNIGHT],
       [-20, 3, TODAY_MIDNIGHT],
       [36.4, 36, YESTERDAY_MIDNIGHT],
       [48, 48, '2026-10-03T22:00:00.000Z'],
+      [72, 72, DEFAULT_WINDOW_START],
       [1000, 168, '2026-09-28T22:00:00.000Z'],
-      [Number.NaN, 36, YESTERDAY_MIDNIGHT],
-      [Number.POSITIVE_INFINITY, 36, YESTERDAY_MIDNIGHT],
+      [Number.NaN, 72, DEFAULT_WINDOW_START],
+      [Number.POSITIVE_INFINITY, 72, DEFAULT_WINDOW_START],
     ];
     for (const [input, expectedHours, expectedFrom] of cases) {
       const { ctx, fake, options } = setup();
@@ -535,6 +544,206 @@ describe('runSync', () => {
     expect(run.status).toBe('error');
     expect(run.message).toBe('SQL timeout');
     expect(run.rowsWritten).toBe(result.stationsWritten + result.snapshotsWritten + result.dailyStatsWritten);
+  });
+
+  describe('write retry', () => {
+    it('retries a create that fails with 5xx once and finishes ok without a warning', async () => {
+      const { data, ctx, options } = setup();
+      data.StationSnapshot.failNext = { op: 'create', error: transientError(503) };
+      const result = await runSync(ctx, 36, options);
+
+      expect(result.ok).toBe(true);
+      expect(result.warnings).toEqual([]);
+      expect(result.snapshotsWritten).toBe(4);
+      expect(data.StationSnapshot.rows.size).toBe(4);
+      expect(data.onlySyncRun()).toMatchObject({ status: 'ok', rowsWritten: 24 });
+      expect(data.onlySyncRun().message).toBeUndefined();
+      expect(console.log).toHaveBeenCalledWith(expect.stringMatching(/pao na prolaznoj grešci \(HTTP Error 503\), ponovni pokušaj za 1 ms/));
+    });
+
+    it('retries an update that fails with 429 (second run: every row exists)', async () => {
+      const { data, ctx, options } = setup();
+      await runSync(ctx, 36, options);
+      data.Station.failNext = { op: 'update', error: transientError(429) };
+      const result = await runSync(ctx, 36, options);
+      expect(result.ok).toBe(true);
+      expect(result.warnings).toEqual([]);
+      expect(result.stationsWritten).toBe(4);
+    });
+
+    it('a second failure becomes the warning „1 red nije upisan u bazu“, the run stays ok with what was written', async () => {
+      const { data, ctx, options } = setup();
+      const contested = dailyStatId(38, 'PM10', '2026-10-06');
+      let attempts = 0;
+      data.DailyStat.onCreate = (input) => {
+        if (input.id === contested && attempts++ < 2) throw transientError(502);
+      };
+      const result = await runSync(ctx, 36, options);
+
+      expect(result.ok).toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(result.warnings).toEqual(['1 red nije upisan u bazu']);
+      expect(attempts).toBe(2); // first attempt + exactly one retry
+      expect(result.dailyStatsWritten).toBe(15);
+      expect(data.DailyStat.rows.size).toBe(15);
+      expect(data.DailyStat.rows.has(contested)).toBe(false);
+      const run = data.onlySyncRun();
+      expect(run).toMatchObject({ status: 'ok', message: '1 red nije upisan u bazu', rowsWritten: 4 + 4 + 15 });
+      // The frontend derives „Delimično“ from this warning (shared/syncNotes).
+      expect(summarizeSyncWarnings(result.warnings)).toMatchObject({ unwrittenRows: 1, partial: true });
+    });
+
+    it('puts the unwritten-rows warning before per-station failures (it must survive message truncation)', async () => {
+      const { data, ctx, options } = setup({ '/api/v1/observations': observationsRoute(ALL_ROWS, [106]) });
+      // Both attempts fail for the 2026-10-05 PM10 rows of stations 36 and 37 → exactly 2 unwritten rows.
+      const doomed = new Set([dailyStatId(36, 'PM10', '2026-10-05'), dailyStatId(37, 'PM10', '2026-10-05')]);
+      data.DailyStat.onCreate = (input) => {
+        if (doomed.has(String(input.id))) throw transientError(500);
+      };
+      const result = await runSync(ctx, 36, options);
+      expect(result.ok).toBe(true);
+      expect(result.warnings).toEqual(['2 reda nisu upisana u bazu', expect.stringMatching(/^Stanica 106: /)]);
+      expect(result.dailyStatsWritten).toBe(12 - 2);
+      expect(summarizeSyncWarnings(result.warnings)).toMatchObject({ failedStations: 1, unwrittenRows: 2, partial: true });
+    });
+
+    it('puts the unwritten-rows warning right after the time-limit warning', async () => {
+      const slow: RouteHandler = (url, attempt) => {
+        vi.setSystemTime(new Date(Date.now() + 70_000));
+        return observationsRoute()(url, attempt);
+      };
+      const { data, ctx, options } = setup({ '/api/v1/observations': slow });
+      const doomed = dailyStatId(36, 'PM10', '2026-10-05');
+      data.DailyStat.onCreate = (input) => {
+        if (input.id === doomed) throw transientError(503);
+      };
+      // One request at a time: 36 at 0 s, 37 at 70 s; 38 and 106 are past the 120 s cut-off.
+      const result = await runSync(ctx, 36, { ...options, concurrency: 1 });
+      expect(result.ok).toBe(true);
+      expect(result.warnings).toEqual(['2 stanice preskočene – vremenski limit', '1 red nije upisan u bazu']);
+      expect(data.onlySyncRun().message).toBe('2 stanice preskočene – vremenski limit | 1 red nije upisan u bazu');
+    });
+
+    it('a run in which the database accepts nothing is an error run, not an „ok“ run with a warning', async () => {
+      // Every create fails twice with 503 (the fallback update fails too: the row does not exist).
+      const { data, ctx, options } = setup();
+      const outage = () => {
+        throw transientError(503);
+      };
+      data.Station.onCreate = outage;
+      data.StationSnapshot.onCreate = outage;
+      data.DailyStat.onCreate = outage;
+      const result = await runSync(ctx, 36, options);
+
+      // 4 stations + 4 snapshots + 16 daily rows were attempted, none written.
+      expect(result.ok).toBe(false);
+      expect(result.stationsWritten + result.snapshotsWritten + result.dailyStatsWritten).toBe(0);
+      expect(result.error).toBe(`Baza nije prihvatila upise: ${unwrittenRowsWarning(24)}`);
+      expect(result.warnings).toEqual([unwrittenRowsWarning(24)]);
+      const run = data.onlySyncRun();
+      // The frontend keeps the previous successful sync as „last“ and the hero does not say „SEPA kasni“.
+      expect(run).toMatchObject({ status: 'error', rowsWritten: 0, message: result.error });
+      expect(data.Station.rows.size + data.StationSnapshot.rows.size + data.DailyStat.rows.size).toBe(0);
+    });
+
+    it('more unwritten than written rows is an error run too; a minority of unwritten rows stays „ok“ (Delimično)', async () => {
+      // All 16 daily rows fail twice while the 4 stations and 4 snapshots are written → 16 > 8 → error.
+      const { data, ctx, options } = setup();
+      data.DailyStat.onCreate = () => {
+        throw transientError(502);
+      };
+      const result = await runSync(ctx, 36, options);
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe(`Baza nije prihvatila upise: ${unwrittenRowsWarning(16)}`);
+      expect(result.stationsWritten).toBe(4);
+      expect(result.snapshotsWritten).toBe(4);
+      expect(result.dailyStatsWritten).toBe(0);
+      expect(data.onlySyncRun()).toMatchObject({ status: 'error', rowsWritten: 8, message: result.error });
+
+      // Same outage for a history day: the 4 station rows are written, none of the daily rows is.
+      const edge = setup();
+      let attempted = 0;
+      edge.data.DailyStat.onCreate = () => {
+        attempted++;
+        throw transientError(502);
+      };
+      const backfill = await runBackfill(edge.ctx, '2026-10-05', edge.options);
+      expect(backfill.ok).toBe(false);
+      expect(attempted).toBeGreaterThan(8); // every daily row: first attempt + one retry
+      expect(backfill.error).toBe(`Baza nije prihvatila upise: ${unwrittenRowsWarning(attempted / 2)}`);
+      expect(backfill.dailyStatsWritten).toBe(0);
+      expect(edge.data.onlySyncRun()).toMatchObject({ status: 'error', rowsWritten: 0, message: backfill.error });
+    });
+
+    it('a programming TypeError in the write path is not a „transient database error“: the run fails with it', async () => {
+      const { data, ctx, options } = setup();
+      data.DailyStat.failNext = { op: 'create', error: new TypeError("Cannot read properties of undefined (reading 'value')") };
+      const result = await runSync(ctx, 36, options);
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe("Cannot read properties of undefined (reading 'value')");
+      expect(result.warnings).toEqual([]);
+      expect(data.onlySyncRun()).toMatchObject({ status: 'error', message: result.error });
+      expect(console.log).not.toHaveBeenCalledWith(expect.stringMatching(/pao na prolaznoj grešci/));
+    });
+
+    it('does not retry errors that are not transient (odbijen ulaz): the run is still an error', async () => {
+      const { data, ctx, options } = setup();
+      data.StationSnapshot.failNext = { op: 'create', error: Object.assign(new Error('Bad request: field x'), { status: 400 }) };
+      const result = await runSync(ctx, 36, options);
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe('Bad request: field x');
+      expect(data.onlySyncRun().status).toBe('error');
+    });
+
+    it('retries deactivation updates too and applies the same rule to a history day', async () => {
+      const { data, ctx, options } = setup();
+      await runSync(ctx, 36, options);
+      const without36 = createFakeFetch({
+        '/api/v1/stations': () => ({ body: stationsPayload().slice(1) }),
+        '/api/v1/observations': observationsRoute(),
+      });
+      // The 4th Station update of the second run is the deactivation of station 36 (3 refreshed first).
+      let updates = 0;
+      const originalUpdate = data.Station.update.bind(data.Station);
+      data.Station.update = async (where, patch) => {
+        if (where.id === stationId(36) && updates++ === 0) throw transientError(503);
+        return originalUpdate(where, patch);
+      };
+      const second = await runSync(ctx, 36, { ...options, fetchImpl: without36.fetchImpl });
+      expect(second.ok).toBe(true);
+      expect(second.warnings).toEqual([]);
+      expect(second.stationsWritten).toBe(4);
+      expect(data.Station.rows.get(stationId(36))!.active).toBe(false);
+
+      const edge = setup();
+      const doomed = dailyStatId(38, 'PM10', '2026-10-05');
+      edge.data.DailyStat.onCreate = (input) => {
+        if (input.id === doomed) throw transientError(503);
+      };
+      const backfill = await runBackfill(edge.ctx, '2026-10-05', edge.options);
+      expect(backfill.ok).toBe(true);
+      expect(backfill.warnings).toEqual(['1 red nije upisan u bazu']);
+      expect(backfill.dailyStatsWritten).toBe(7);
+      expect(edge.data.onlySyncRun()).toMatchObject({ status: 'ok', message: '1 red nije upisan u bazu' });
+    });
+
+    it('classifies transient write errors by status, then by kind, then by message', () => {
+      expect(isTransientWriteError(transientError(429))).toBe(true);
+      expect(isTransientWriteError(transientError(503))).toBe(true);
+      expect(isTransientWriteError(Object.assign(new Error('x'), { status: 400 }))).toBe(false);
+      expect(isTransientWriteError(Object.assign(new Error('x'), { status: 409 }))).toBe(false);
+      expect(isTransientWriteError(Object.assign(new Error('wrapped'), { cause: Object.assign(new Error('inner'), { status: 502 }) }))).toBe(true);
+      expect(isTransientWriteError(new TypeError('fetch failed'))).toBe(true);
+      // A TypeError is transient only with a network message – a programming error is not.
+      expect(isTransientWriteError(new TypeError('Cannot read properties of undefined (reading "x")'))).toBe(false);
+      expect(isTransientWriteError(new TypeError('terminated'))).toBe(false);
+      expect(isTransientWriteError(Object.assign(new Error('Network error: fetch failed'), { name: 'NetworkError' }))).toBe(true);
+      expect(isTransientWriteError(new Error('read ECONNRESET'))).toBe(true);
+      expect(isTransientWriteError(new Error('HTTP Error 503: Service Unavailable'))).toBe(true);
+      expect(isTransientWriteError(new Error('GraphQL errors: Cannot insert duplicate key'))).toBe(false);
+      expect(isTransientWriteError(new Error('SQL timeout'))).toBe(false);
+      expect(isTransientWriteError('string error')).toBe(false);
+    });
   });
 
   it('still returns a result when the SyncRun row cannot be closed', async () => {

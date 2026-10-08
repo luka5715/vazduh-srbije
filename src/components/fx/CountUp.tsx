@@ -3,14 +3,21 @@ import { useEffect, useRef, useState } from 'react';
 import { useReducedMotion } from '@/hooks/useReducedMotion';
 import { formatNumber } from '@/lib/format';
 
+/** Najduže trajanje animirane promene vrednosti (pravilo kretanja: ≤ 0,5 s). */
+export const COUNT_UP_MAX_MS = 500;
+
 export interface CountUpProps {
   /** Ciljna vrednost; null prikazuje crticu (bez animacije). */
   value: number | null;
   /** Formatiranje broja (podrazumevano `formatNumber(v, 0)`, sr-Latn). */
   format?: (value: number) => string;
-  /** Trajanje u ms (podrazumevano 900, ease-out). */
+  /** Trajanje animirane promene u ms (podrazumevano i najviše `COUNT_UP_MAX_MS`, ease-out). */
   duration?: number;
-  /** Početna vrednost pri prvom prikazu (podrazumevano 0). */
+  /**
+   * Izričit opt-in za odbrojavanje pri PRVOM prikazu (npr. brojači napretka na Sinhronizaciji
+   * koji kreću od 0). Bez ovoga prvi prikaz je odmah konačna vrednost – brojevi na Pregledu i u
+   * KPI pločicama ne „odbrojavaju“ od nule pri svakom povratku na stranicu.
+   */
   from?: number;
   className?: string;
 }
@@ -18,15 +25,18 @@ export interface CountUpProps {
 const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
 
 /**
- * Broj koji „odbrojava“ do vrednosti (requestAnimationFrame, ~900 ms ease-out).
- * Pri osvežavanju kreće od prethodne vrednosti. Uz smanjeno kretanje odmah prikazuje
- * konačnu vrednost. Čitači ekrana dobijaju samo konačnu vrednost (animirani tekst je aria-hidden).
- * Veliki brojevi koriste proporcionalne cifre (bez `tnum`).
+ * Broj čija se PROMENA animira (requestAnimationFrame, ≤ 0,5 s ease-out, od prethodne ka novoj
+ * vrednosti). Prvi prikaz je uvek konačna vrednost – nema odbrojavanja od nule – osim uz izričit
+ * `from`. Uz smanjeno kretanje odmah prikazuje konačnu vrednost. Čitači ekrana dobijaju samo
+ * konačnu vrednost (animirani tekst je aria-hidden). Veliki brojevi koriste proporcionalne
+ * cifre (bez `tnum`).
  */
-export function CountUp({ value, format = (v) => formatNumber(v, 0), duration = 900, from = 0, className }: CountUpProps) {
+export function CountUp({ value, format = (v) => formatNumber(v, 0), duration = COUNT_UP_MAX_MS, from, className }: CountUpProps) {
   const reduced = useReducedMotion();
-  const [display, setDisplay] = useState<number | null>(() => (value === null ? null : reduced ? value : from));
+  // Prvi prikaz: konačna vrednost; `from` (opt-in) je početak odbrojavanja, osim uz smanjeno kretanje.
+  const [display, setDisplay] = useState<number | null>(() => (value === null ? null : reduced || from === undefined ? value : from));
   const currentRef = useRef<number | null>(display);
+  const fromRef = useRef(from);
 
   useEffect(() => {
     if (value === null) {
@@ -34,16 +44,18 @@ export function CountUp({ value, format = (v) => formatNumber(v, 0), duration = 
       setDisplay(null);
       return;
     }
-    const start = currentRef.current ?? from;
+    // Posle crtice (nema podatka → podatak) nema odbrojavanja od nule: skok na vrednost, osim uz `from`.
+    const start = currentRef.current ?? fromRef.current ?? value;
     if (reduced || start === value || typeof requestAnimationFrame !== 'function') {
       currentRef.current = value;
       setDisplay(value);
       return;
     }
+    const total = Math.max(0, Math.min(COUNT_UP_MAX_MS, duration));
     let frame = 0;
     const startedAt = performance.now();
     const tick = (time: number) => {
-      const progress = Math.min(1, (time - startedAt) / duration);
+      const progress = total > 0 ? Math.min(1, (time - startedAt) / total) : 1;
       const next = progress >= 1 ? value : start + (value - start) * easeOutCubic(progress);
       currentRef.current = next;
       setDisplay(next);
@@ -51,7 +63,7 @@ export function CountUp({ value, format = (v) => formatNumber(v, 0), duration = 
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [value, reduced, duration, from]);
+  }, [value, reduced, duration]);
 
   const finalText = value === null ? '–' : format(value);
   return (

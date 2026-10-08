@@ -211,18 +211,23 @@ export interface LiveStatus {
   live: boolean;
   /** Interval sa datumom kad nije današnji: „16–17 h“ ili „06. 10. 16–17 h“ („–“ bez merenja). */
   label: string;
-  /** Starost početka intervala, kao „Izmereno … · pre 2 h“ kod stanice: „pre 2 h“ (prazno bez merenja). */
+  /**
+   * Starost KRAJA intervala, kao „Izmereno … · pre 2 h“ kod stanice: „pre 2 h“ = interval se
+   * završio pre 2 h (prazno bez merenja). Isti trenutak kao za `live`: sat 0–1 h koji se
+   * zatvorio pre 28 min je „pre 28 min“, ne „pre 1 h“ (starost početka bi dodala ceo sat).
+   */
   ageText: string;
 }
 
 /**
  * Status najnovijeg sata mreže (`latestObservedAt` = POČETAK satnog intervala, kao
  * `time_start_utc`). Uživo samo dok je interval završen pre najviše `LIVE_HOURS` sati; sat
- * uvek nosi starost i datum kad nije današnji – stari podatak nikad ne izgleda kao svež.
+ * uvek nosi starost (od kraja intervala) i datum kad nije današnji – stari podatak nikad ne
+ * izgleda kao svež.
  */
 export function liveStatus(latestObservedAt: Date | null, now: Date): LiveStatus {
   if (!latestObservedAt || Number.isNaN(latestObservedAt.getTime())) return { live: false, label: '–', ageText: '' };
   const endMs = latestObservedAt.getTime() + 3_600_000;
   const live = now.getTime() - endMs <= LIVE_HOURS * 3_600_000;
-  return { live, label: formatHourAt(latestObservedAt, now), ageText: formatRelative(latestObservedAt, now) };
+  return { live, label: formatHourAt(latestObservedAt, now), ageText: formatRelative(endMs, now) };
 }

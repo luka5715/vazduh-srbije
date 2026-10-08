@@ -14,7 +14,7 @@ import { useMyStation } from '@/hooks/useMyStation';
 import { CATEGORIES, catVar, RANKS } from '@/lib/category';
 import { cn } from '@/lib/cn';
 import { formatInt, stationsNoun } from '@/lib/format';
-import { dominantDrivers, lensDistribution, okrugLabel } from '@/lib/insights';
+import { dominantDrivers, hazeColor, lensDistribution, okrugLabel } from '@/lib/insights';
 import { activeViews, liveStatus } from '@/lib/stations';
 
 import { LiveTicker } from './LiveTicker';
@@ -53,21 +53,33 @@ export function OverviewHero({ className, style }: { className?: string; style?:
   const note = staleNote(stale);
 
   const eyebrow = [
-    <span key="title">Stanje vazduha</span>,
-    // Sočivo menja ostale panele, ne heroj: natpis to kaže umesto da nosi oznaku sočiva.
-    lens !== 'worst' ? <span key="all">svi polutanti</span> : null,
+    <span key="title">
+      Stanje vazduha
+      {/* Sočivo menja ostale panele, ne heroj: red sočiva ispod to pokazuje, a čitači ekrana
+          dobijaju „svi polutanti“ ovde (vidljiv natpis bi samo ponovio red sočiva). */}
+      {lens !== 'worst' ? <span className="sr-only">, svi polutanti</span> : null}
+    </span>,
     okrug ? (
       <span key="okrug" className="text-ink">
         {okrugLabel(okrug)}
       </span>
     ) : null,
+    // Sat i starost su jedna celina koja se ne lomi: „pre 2 h“ nikad ne ostaje samo u novom redu.
     hourAt ? (
-      <span key="hour">
+      <span key="hour" className="whitespace-nowrap">
         {status.live ? 'najnoviji sat' : 'poslednji sat'} <span className="tnum text-ink">{status.label}</span>
+        {status.ageText ? (
+          <>
+            <span className="text-muted"> · </span>
+            {status.ageText}
+          </>
+        ) : null}
       </span>
     ) : null,
-    hourAt && status.ageText ? <span key="age">{status.ageText}</span> : null,
   ].filter((part) => part !== null);
+  // Reč naslova nosi boju svoje kategorije i kad se razlikuje od izmaglice (naslov sa dva
+  // stanja: izmaglica je dominantna kategorija, reč je lošija).
+  const wordStyle = headline && headline.rank !== hazeRank ? ({ '--haze': hazeColor(headline.rank) } as CSSProperties) : undefined;
 
   return (
     <GlassPanel variant="hero" className={cn('overflow-hidden', className)} style={style} aria-labelledby="hero-title">
@@ -96,7 +108,12 @@ export function OverviewHero({ className, style }: { className?: string; style?:
           >
             {headline ? (
               <>
-                {headline.lead} <span className="haze-underline whitespace-nowrap">{headline.word}</span>
+                {/* Naslov sa dva stanja: „do“ ostaje uz reč kategorije (tvrdi razmak), nikad sâmo na kraju reda. */}
+                {headline.lead}
+                {headline.lead.endsWith(' do') ? '\u00a0' : ' '}
+                <span className="haze-underline whitespace-nowrap" style={wordStyle}>
+                  {headline.word}
+                </span>
               </>
             ) : (
               'Nema svežih merenja'
@@ -107,12 +124,12 @@ export function OverviewHero({ className, style }: { className?: string; style?:
             {distributionRepeatsHeadline(countsByCategory) && driver ? null : distributionSentence(countsByCategory)}
             {driver ? <span className="text-ink/90"> {driver}</span> : null}
           </p>
-          {lensLine ? (
-            <p className="mt-2 flex items-start gap-1.5 text-[13px] leading-5 text-muted">
-              <Eye aria-hidden className="mt-0.5 size-3.5 shrink-0 text-faint" />
-              <span>{lensLine}</span>
-            </p>
-          ) : null}
+          {/* Red sočiva je uvek tu (visina rezervisana u pregled.css): izbor sočiva ne pomera
+              sekcije ispod heroja. Bez sočiva red kaže šta će tu stajati. */}
+          <p className="ov-hero__lens mt-2 flex items-start gap-1.5 text-[13px] leading-5 text-muted">
+            <Eye aria-hidden className="mt-0.5 size-3.5 shrink-0 text-faint" />
+            <span>{lensLine ?? 'Sočivo polutanta ovde dodaje raspodelu po jednom polutantu.'}</span>
+          </p>
         </div>
 
         <div className="ov-hero__ring">
@@ -130,14 +147,16 @@ export function OverviewHero({ className, style }: { className?: string; style?:
           <p>Gustina čestica u pozadini prati medijanu PM10 mreže.</p>
         </div>
 
+        {/* Telefon: radnje heroja su 40 px (izbor stanice je glavna radnja; `<select>` nema
+            `touch-target`), od 640 px 32 px kao ostale pilule. */}
         <div className="ov-hero__actions flex flex-wrap items-center gap-2">
-          <HowToReadButton />
-          {storedId === null ? <MyStationPicker label="Izaberi moju stanicu" /> : null}
+          <HowToReadButton className="h-10 sm:h-8" />
+          {storedId === null ? <MyStationPicker label="Izaberi moju stanicu" tall /> : null}
           {okrug ? (
             <button
               type="button"
               onClick={() => setOkrug(null)}
-              className="touch-target inline-flex h-8 items-center gap-1.5 rounded-full border border-border px-3 text-[13px] text-muted transition-colors hover:border-border-strong hover:text-ink"
+              className="touch-target inline-flex h-10 items-center gap-1.5 rounded-full border border-border px-3 text-[13px] text-muted transition-colors hover:border-border-strong hover:text-ink sm:h-8"
             >
               <X aria-hidden className="size-3.5" />
               Prikaži celu mrežu
@@ -230,7 +249,7 @@ function HeroRing({ size, reporting, total, counts }: { size: number; reporting:
           <CountUp value={reporting} />
           <span className={cn('ml-1 font-medium text-faint', big ? 'text-lg' : 'text-sm')}>/ {formatInt(total)}</span>
         </span>
-        <span className={cn('font-mono text-[11px] uppercase tracking-[0.12em] text-muted', big ? 'mt-1.5' : 'mt-1')}>{stationsNoun(total)}</span>
+        <span className={cn('font-mono text-[12px] uppercase tracking-[0.12em] text-muted sm:text-[11px]', big ? 'mt-1.5' : 'mt-1')}>{stationsNoun(total)}</span>
       </SegmentRing>
     </div>
   );

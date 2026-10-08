@@ -1,7 +1,7 @@
 import '@/styles/stanice.css';
 
 import { SearchX } from 'lucide-react';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { StationTable } from '@/components/StationTable';
 import { GlassPanel } from '@/components/fx/GlassPanel';
@@ -39,6 +39,8 @@ import { activeViews, isInactive } from '@/lib/stations';
  * Pretraga, filter kategorije, redosled i prikaz neaktivnih žive u URL-u (`?q=`, `?grupa=`,
  * `?sort=`, `?neaktivne=1`, zamenom unosa): „Nazad“ sa Mape vraća listu kakva je bila.
  * Neaktivne stanice (SEPA ih je ugasila) nisu na listi dok ih korisnik ne uključi.
+ * Kartice bez filtera i pretrage: prvih 20 i „+N stanica“ (`cardSlice`); svaka promena
+ * pretrage, okruga, grupe ili redosleda vraća listu na prvih 20.
  */
 export function StationsView() {
   const { views, filteredViews, lens, okrug, okrugs, setOkrug, openStation, networkKpis } = useAtmosfera();
@@ -72,6 +74,13 @@ export function StationsView() {
   );
 
   const filtersActive = query.trim() !== '' || activeGroup !== null || okrug !== null;
+  // „+N stanica“ važi za jednu listu: svaka promena pretrage/okruga/grupe/redosleda je sklapa
+  // (stanje izvedeno iz ključa liste – postavlja se tokom rendera, pa nema kadra sa svim karticama).
+  const listKey = `${query}|${okrug ?? ''}|${activeGroup ?? ''}|${sortValue ?? ''}|${showInactive ? 1 : 0}`;
+  const [expansion, setExpansion] = useState({ key: listKey, expanded: false });
+  if (expansion.key !== listKey) setExpansion({ key: listKey, expanded: false });
+  const cardsExpanded = expansion.key === listKey && expansion.expanded;
+  const toggleCards = useCallback(() => setExpansion((current) => ({ key: listKey, expanded: !(current.key === listKey && current.expanded) })), [listKey]);
   // Jedan upis u URL (vidi `replaceParams`): okrug, pretraga i grupa se brišu zajedno.
   const resetFilters = useCallback(() => replaceParams({ [QUERY_PARAM]: null, [GROUP_PARAM]: null, [OKRUG_PARAM]: null }), [replaceParams]);
   const setQuery = useCallback((value: string) => replaceParams({ [QUERY_PARAM]: value || null }), [replaceParams]);
@@ -172,6 +181,7 @@ export function StationsView() {
             onOpen={openStation}
             currentId={stationParam}
             latest={latest}
+            limit={{ capped: !filtersActive, expanded: cardsExpanded, onToggle: toggleCards }}
             className="@3xl:hidden"
           />
         </>

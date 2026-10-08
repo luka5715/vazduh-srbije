@@ -91,4 +91,47 @@ describe('delimičan i neispravan posao u dnevniku', () => {
     expect(screen.getByText(INVALID_NOTE)).toBeInTheDocument();
     expect(screen.getByText('Delimično')).toBeInTheDocument();
   });
+
+  it('„Delimično“ samo zbog neupisanih redova (R1): razlog je prolazna greška baze, ne „0 stanica bez novih merenja“', () => {
+    const unwritten: SyncRunRecord = { ...runs[1], id: 'unwritten', status: 'ok', message: '3 reda nisu upisana u bazu' };
+    render(<RunTimeline runs={[unwritten]} now={NOW} />);
+    expect(screen.getByText('Delimično')).toBeInTheDocument();
+    expect(screen.getByText(/prolazna greška baze; sledeća sinhronizacija ih piše ponovo/)).toBeInTheDocument();
+    expect(screen.getAllByText('3 reda nisu upisana u bazu').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/bez novih merenja/)).toBeNull();
+  });
+
+  it('„Delimično“ sa stanicama i neupisanim redovima navodi oba razloga', () => {
+    const both: SyncRunRecord = { ...runs[1], id: 'both', status: 'ok', message: 'Stanica 106: HTTP 500 | 1 red nije upisan u bazu' };
+    render(<RunTimeline runs={[both]} now={NOW} />);
+    expect(screen.getByText('1 stanica bez novih merenja')).toBeInTheDocument();
+    expect(screen.getByText(/Uz to 1 red nije upisan u bazu – prolazna greška baze/)).toBeInTheDocument();
+  });
+});
+
+describe('traka trajanja prema najdužem poslu u dnevniku (R11)', () => {
+  const ok = (id: string, ms: number, kind: 'sync' | 'backfill' = 'sync'): SyncRunRecord => ({
+    ...runs[1],
+    id,
+    kind,
+    status: 'ok',
+    finishedAt: new Date(new Date(runs[1].startedAt).getTime() + ms),
+    message: null,
+  });
+
+  it('brzi poslovi se razlikuju: skala je najmanje 60 s, pa je 12 s petina, a 30 s polovina trake', () => {
+    render(<RunTimeline runs={[ok('q1', 12_000), ok('q2', 30_000)]} now={NOW} />);
+    const bars = screen.getAllByTestId('duration-bar');
+    expect(bars.map((bar) => bar.dataset.ratio)).toEqual(['0.200', '0.500']);
+    // Kraj staze nosi skalu, ne limit funkcije.
+    expect(screen.getAllByText('1 min')).toHaveLength(2);
+    expect(screen.queryByText('240 s')).toBeNull();
+  });
+
+  it('sporiji dan istorije širi skalu; napušten posao ostaje puna traka', () => {
+    render(<RunTimeline runs={[ok('s', 12_000), ok('b', 142_000, 'backfill'), runs[0]]} now={NOW} />);
+    const bars = screen.getAllByTestId('duration-bar');
+    expect(bars.map((bar) => bar.dataset.ratio)).toEqual(['0.085', '1.000', '1.000']);
+    expect(screen.getAllByText('2 min 22 s').length).toBeGreaterThanOrEqual(3);
+  });
 });

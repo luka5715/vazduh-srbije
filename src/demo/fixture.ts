@@ -12,6 +12,10 @@
  * Istorija namerno ima rupe (`demoHistoryGaps`): dva dana koja niko nije učitao i jedan dan
  * učitan samo za deo stanica, kao u pravoj bazi kad aplikaciju danima niko ne otvori. Demo
  * servis ih „učita“ kad korisnik pokrene „Dopuni nedostajuće dane“.
+ *
+ * Scenariji (`DemoScenario`, vidi `services/demoScenario`) menjaju samo oblik izmišljenih podataka:
+ * `smog` – epizoda smoga poslednja tri dana (medijana PM10 ≈ `SMOG_PM10_MEDIAN`), `beograd` –
+ * devet stanica u beogradskom klasteru umesto dve. Podrazumevani skup ostaje nepromenjen.
  */
 
 import { computeDailyStats, computeSnapshot } from '@shared/aggregate';
@@ -26,8 +30,10 @@ import type { KosavaObservation } from '@shared/kosava';
 import { addDays, dayUtcRange, localDay, localHour } from '@shared/time';
 
 import okruzi from '@/data/okruzi.json';
+import { SYNC_HOURS_BACK } from '@/hooks/useSync';
 import type { GeoCollection } from '@/lib/geo';
 import { isKosovoDistrict } from '@/lib/geo';
+import type { DemoScenario } from '@/services/demoScenario';
 
 export interface DemoFixture {
   stations: StationRecord[];
@@ -109,6 +115,24 @@ const PROFILES: Record<string, Partial<Profile>> = {
   Prokuplje: { pm: 1.0 },
 };
 
+/**
+ * „Demo – Beograd“: devet izmišljenih stanica gradskih opština u krugu od 12 km (centar grada
+ * ≈ 44,81 N 20,46 E), umesto dve podrazumevane. Profili su namerno raznoliki (kotlina Rakovice
+ * sa grejanjem, saobraćaj Vračara, industrija uz Dunav, zelena Zvezdara), pa su kategorije
+ * mešovite – provera razmaka markera na mapi kad se stanice gužvaju.
+ */
+const BEOGRAD_CLUSTER: ReadonlyArray<{ municipality: string; lat: number; lon: number; profile: Partial<Profile>; lagHours?: number }> = [
+  { municipality: 'Stari grad', lat: 44.8186, lon: 20.4578, profile: { pm: 1.3, no2: 1.9, so2: 0.9 } },
+  { municipality: 'Novi Beograd', lat: 44.8065, lon: 20.395, profile: { pm: 1.05, no2: 1.9, so2: 0.8, o3: 0.9 } },
+  { municipality: 'Zemun', lat: 44.8458, lon: 20.401, profile: { pm: 0.9, no2: 1.4 } },
+  { municipality: 'Vračar', lat: 44.7975, lon: 20.472, profile: { pm: 1.15, no2: 2.3, so2: 0.9 } },
+  { municipality: 'Voždovac', lat: 44.772, lon: 20.483, profile: { pm: 1.0, no2: 1.5 } },
+  { municipality: 'Čukarica', lat: 44.77, lon: 20.42, profile: { pm: 1.6, no2: 1.3 } },
+  { municipality: 'Rakovica', lat: 44.745, lon: 20.447, profile: { pm: 2.9, no2: 1.1 } },
+  { municipality: 'Savski venac', lat: 44.7905, lon: 20.4505, profile: { pm: 0.75, no2: 1.6, so2: 1.6 }, lagHours: 3 },
+  { municipality: 'Zvezdara', lat: 44.79, lon: 20.51, profile: { pm: 0.5, no2: 0.9, o3: 1.15 } },
+];
+
 /** Satni oblik dana po parametru (indeks = lokalni sat). */
 const DIURNAL: Record<Parameter, number[]> = {
   PM10: [1.25, 1.15, 1.0, 0.9, 0.85, 0.9, 1.05, 1.2, 1.15, 0.95, 0.8, 0.7, 0.65, 0.65, 0.7, 0.8, 0.95, 1.15, 1.4, 1.6, 1.7, 1.65, 1.5, 1.35],
@@ -126,6 +150,26 @@ const BASE: Record<Parameter, number> = {
   SO2: 7,
   O3: 46,
 };
+
+/**
+ * „Demo – smog“: ciljna medijana PM10 mreže na vrhuncu izmišljene epizode (danas), µg/m³ –
+ * iznad poslednjeg SEPA praga (270), pa je većina stanica „Veoma zagađen“/„Opasan“, a izmaglica
+ * i čestice Košave su na maksimumu (`pmIntensity` = 1).
+ */
+export const SMOG_PM10_MEDIAN = 300;
+
+/**
+ * Udeo epizode smoga prema satima unazad od najnovijeg sata MREŽE: poslednja 24 h vrhunac, pa
+ * slabije do 96 h unazad, ranije ništa. Vezano za sate, a ne za kalendarski dan, da se vrhunac ne
+ * „izgubi“ odmah posle ponoći (najnoviji sat je tada još jučerašnji).
+ */
+export function smogRamp(hoursBack: number): number {
+  if (hoursBack < 24) return 1;
+  if (hoursBack < 48) return 0.8;
+  if (hoursBack < 72) return 0.55;
+  if (hoursBack < 96) return 0.3;
+  return 0;
+}
 
 /** Jedan korak mulberry32 – deterministički broj u [0,1) za zadati seed. */
 function hash01(seed: number): number {
@@ -171,7 +215,7 @@ export interface DemoStationSpec {
 /** Zastoj zastarele demo stanice: poslednje merenje pre ~3 dana (snimak postoji, ali je zastareo). */
 export const STALE_LAG_HOURS = 73;
 
-export function buildSpecs(): DemoStationSpec[] {
+export function buildSpecs(scenario: DemoScenario = 'default'): DemoStationSpec[] {
   const features = (okruzi as GeoCollection).features.filter((f) => !isKosovoDistrict(f.properties.name));
   const specs: DemoStationSpec[] = [];
   let index = 0;
@@ -180,6 +224,25 @@ export function buildSpecs(): DemoStationSpec[] {
     if (!town) continue;
     const [lon, lat] = feature.properties.centroid ?? [20.5, 44];
     const profile = { pm: 1, no2: 1, so2: 1, o3: 1, ...PROFILES[town] };
+    if (town === 'Beograd' && scenario === 'beograd') {
+      // „Demo – Beograd“: klaster od devet stanica umesto dve podrazumevane.
+      BEOGRAD_CLUSTER.forEach((site, i) => {
+        index++;
+        specs.push({
+          sepaId: 9000 + index,
+          id: `demo-station-${9000 + index}`,
+          name: `Demo stanica Beograd ${i + 1}`,
+          code: `DEMO-${String(index).padStart(3, '0')}`,
+          municipality: site.municipality,
+          lat: site.lat,
+          lon: site.lon,
+          profile: { pm: 1, no2: 1, so2: 1, o3: 1, ...site.profile },
+          parameters: [...PARAMETERS],
+          lagHours: site.lagHours ?? 1,
+        });
+      });
+      continue;
+    }
     index++;
     const sepaId = 9000 + index;
     const noCoordinates = town === 'Valjevo' || town === 'Čačak';
@@ -268,20 +331,52 @@ function so2Spike(sepaId: number, hourIndex: number): number {
   return spike;
 }
 
-/** Satna merenja jedne stanice za poslednjih `hours` sati do `latestHourMs`. */
-export function generateObservations(spec: DemoStationSpec, latestHourMs: number, todayDay: string, hours: number): KosavaObservation[] {
+/**
+ * Satna merenja jedne stanice za poslednjih `hours` sati do `latestHourMs`. U scenariju `smog`
+ * PM poslednja četiri dana raste ka ravnom nivou epizode (inverzija ne pušta: dnevni tok je skoro
+ * ravan), NO₂ i SO₂ blago rastu, O₃ opada; ostali scenariji ne menjaju vrednosti. Epizoda se
+ * računa od najnovijeg sata mreže (`networkLatestHourMs`), pa zastarela stanica ne dobija svoj
+ * sopstveni vrhunac.
+ */
+export function generateObservations(
+  spec: DemoStationSpec,
+  latestHourMs: number,
+  todayDay: string,
+  hours: number,
+  scenario: DemoScenario = 'default',
+  networkLatestHourMs: number = latestHourMs,
+): KosavaObservation[] {
   const observations: KosavaObservation[] = [];
   const slots = hourSlots(latestHourMs, todayDay, hours);
+  const smog = scenario === 'smog';
+  const networkLatestIndex = networkLatestHourMs / HOUR_MS;
   for (const parameter of spec.parameters) {
     const parameterIndex = PARAMETERS.indexOf(parameter);
     const base = BASE[parameter] * profileFactor(spec.profile, parameter);
     const industrial = parameter === 'SO2' && spec.profile.so2 > 2;
+    const particulate = parameter === 'PM10' || parameter === 'PM2.5';
     for (const { hourIndex, iso, hour, weather } of slots) {
       const weatherMultiplier =
-        parameter === 'O3' ? weather.o3 : parameter === 'PM10' || parameter === 'PM2.5' ? weather.pm : 1 + (weather.pm - 1) * 0.3;
+        parameter === 'O3' ? weather.o3 : particulate ? weather.pm : 1 + (weather.pm - 1) * 0.3;
       const noise = 1 + (hash01(spec.sepaId * 1_000_003 + parameterIndex * 7919 + hourIndex) - 0.5) * 0.5;
       const spike = industrial ? so2Spike(spec.sepaId, hourIndex) : 0;
-      const value = base * DIURNAL[parameter][hour] * weatherMultiplier * noise * (1 + spike);
+      let value = base * DIURNAL[parameter][hour] * weatherMultiplier * noise * (1 + spike);
+      const ramp = smog ? smogRamp(networkLatestIndex - hourIndex) : 0;
+      if (ramp > 0) {
+        if (particulate) {
+          // Nivo epizode: ciljna medijana PM10 (PM2.5 u istom odnosu kao osnovne vrednosti) uz
+          // sabijen profil stanice (√ – smog pokriva celu zemlju, ravnica ostaje nešto čistija),
+          // skoro ravan dnevni tok i mali šum (stabilan vazduh inverzije).
+          const calm = 1 + (noise - 1) * 0.3;
+          const spread = Math.sqrt(profileFactor(spec.profile, parameter));
+          const target = BASE[parameter] * spread * (SMOG_PM10_MEDIAN / BASE.PM10) * (0.92 + 0.08 * DIURNAL[parameter][hour]) * calm;
+          value += (target - value) * ramp;
+        } else if (parameter === 'O3') {
+          value *= 1 - 0.4 * ramp;
+        } else {
+          value *= 1 + 0.6 * ramp;
+        }
+      }
       observations.push({
         sepaId: spec.sepaId,
         parameter,
@@ -307,17 +402,17 @@ export interface DemoCore {
 }
 
 /** Stanice i snimci (brzo: 48 h po stanici); zastarela stanica ima snimak star ~3 dana. */
-export function buildDemoCore(now: Date = new Date()): DemoCore {
+export function buildDemoCore(now: Date = new Date(), scenario: DemoScenario = 'default'): DemoCore {
   const latestHourMs = latestHourFor(now);
   const today = localDay(now);
-  const specs = buildSpecs();
+  const specs = buildSpecs(scenario);
   const updatedAt = new Date(now.getTime() - 12 * 60_000);
   const stations: StationRecord[] = [];
   const snapshots: StationSnapshotRecord[] = [];
 
   for (const spec of specs) {
     const latestForStation = latestHourMs - (spec.lagHours - 1) * HOUR_MS;
-    const recent = generateObservations(spec, latestForStation, today, SNAPSHOT_HOURS);
+    const recent = generateObservations(spec, latestForStation, today, SNAPSHOT_HOURS, scenario, latestHourMs);
     const snapshot = computeSnapshot(recent);
     stations.push({
       id: spec.id,
@@ -348,12 +443,12 @@ export function buildDemoCore(now: Date = new Date()): DemoCore {
 }
 
 /** Dnevna statistika jedne stanice za HISTORY_DAYS dana (sporo: ~3 700 merenja kroz computeDailyStats). */
-export function dailyStatsForStation(spec: DemoStationSpec, now: Date): DailyStatRecord[] {
+export function dailyStatsForStation(spec: DemoStationSpec, now: Date, scenario: DemoScenario = 'default'): DailyStatRecord[] {
   const latestHourMs = latestHourFor(now);
   const today = localDay(now);
   // Zastarela stanica: istorija se takođe završava pre ~3 dana (poslednji dani bez statistike).
   const latestForStation = latestHourMs - (spec.lagHours - 1) * HOUR_MS;
-  const observations = generateObservations(spec, latestForStation, today, HISTORY_DAYS * 24);
+  const observations = generateObservations(spec, latestForStation, today, HISTORY_DAYS * 24, scenario, latestHourMs);
   const updatedAt = new Date(now.getTime() - 12 * 60_000);
   return computeDailyStats(observations).map((stat) => ({
     id: `demo-daily-${spec.sepaId}-${stat.parameter}-${stat.day}`,
@@ -370,11 +465,15 @@ export function dailyStatsForStation(spec: DemoStationSpec, now: Date): DailySta
   }));
 }
 
-export function buildDemoSyncRuns(now: Date): SyncRunRecord[] {
+/** Dnevnik sinhronizacija; `stationCount` je broj stanica demo mreže (26, u scenariju `beograd` 33). */
+export function buildDemoSyncRuns(now: Date, stationCount = 26): SyncRunRecord[] {
   const minute = 60_000;
   const t = now.getTime();
-  /** Kao `runSync`: prozor od 36 h čiji se početak vraća na lokalnu ponoć svog dana. */
-  const syncWindowFrom = (end: number) => dayUtcRange(localDay(new Date(end - 36 * HOUR_MS))).from;
+  /** Redovi i merenja srazmerno broju stanica (podrazumevano 26 stanica, 25 svežih snimaka). */
+  const scaled = (perNetwork: number) => Math.round((perNetwork * stationCount) / 26);
+  const syncRows = stationCount + (stationCount - 1) + scaled(236);
+  /** Kao `runSync`: prozor od `SYNC_HOURS_BACK` h (72) čiji se početak vraća na lokalnu ponoć svog dana. */
+  const syncWindowFrom = (end: number) => dayUtcRange(localDay(new Date(end - SYNC_HOURS_BACK * HOUR_MS))).from;
   const run = (
     id: string,
     kind: 'sync' | 'backfill',
@@ -401,14 +500,14 @@ export function buildDemoSyncRuns(now: Date): SyncRunRecord[] {
   const y1 = new Date(y0.getTime() + DAY_MS);
   return [
     run('demo-run-1', 'sync', 'ok', 12 * minute + 95_000, 95_000, syncWindowFrom(t - 12 * minute), new Date(t - 12 * minute), {
-      stationsSeen: 26,
-      observationsSeen: 4_518,
-      rowsWritten: 26 + 25 + 236,
+      stationsSeen: stationCount,
+      observationsSeen: scaled(4_518),
+      rowsWritten: syncRows,
     }),
     run('demo-run-2', 'sync', 'ok', 73 * minute, 88_000, syncWindowFrom(t - 73 * minute), new Date(t - 73 * minute), {
-      stationsSeen: 26,
-      observationsSeen: 4_490,
-      rowsWritten: 26 + 25 + 236,
+      stationsSeen: stationCount,
+      observationsSeen: scaled(4_490),
+      rowsWritten: syncRows,
     }),
     run(
       'demo-run-3',
@@ -418,7 +517,7 @@ export function buildDemoSyncRuns(now: Date): SyncRunRecord[] {
       31_000,
       syncWindowFrom(t - 130 * minute),
       new Date(t - 130 * minute),
-      { stationsSeen: 26, observationsSeen: 0, rowsWritten: 26 },
+      { stationsSeen: stationCount, observationsSeen: 0, rowsWritten: stationCount },
       'Kosava API: HTTP 503 Service Unavailable (observations?station_id=9003)',
     ),
     run(
@@ -429,7 +528,7 @@ export function buildDemoSyncRuns(now: Date): SyncRunRecord[] {
       142_000,
       y0,
       y1,
-      { stationsSeen: 26, observationsSeen: 3_000, rowsWritten: 125 },
+      { stationsSeen: stationCount, observationsSeen: scaled(3_000), rowsWritten: scaled(125) },
       `Dan ${localDay(y0.getTime() + 12 * HOUR_MS)}`,
     ),
     run(
@@ -440,7 +539,7 @@ export function buildDemoSyncRuns(now: Date): SyncRunRecord[] {
       139_000,
       new Date(y0.getTime() - DAY_MS),
       y0,
-      { stationsSeen: 26, observationsSeen: 3_000, rowsWritten: 125 },
+      { stationsSeen: stationCount, observationsSeen: scaled(3_000), rowsWritten: scaled(125) },
       `Dan ${localDay(y0.getTime() - 12 * HOUR_MS)}`,
     ),
   ];
@@ -477,9 +576,9 @@ export function isDemoGap(stat: Pick<DailyStatRecord, 'day' | 'station_id'>, gap
 }
 
 /** Ceo demo skup odjednom (testovi, merenja); UI koristi lenju varijantu u DemoDataService. */
-export function buildDemoFixture(now: Date = new Date()): DemoFixture {
-  const core = buildDemoCore(now);
+export function buildDemoFixture(now: Date = new Date(), scenario: DemoScenario = 'default'): DemoFixture {
+  const core = buildDemoCore(now, scenario);
   const gaps = demoHistoryGaps(core.specs, now);
-  const dailyStats = core.specs.flatMap((spec) => dailyStatsForStation(spec, now)).filter((stat) => !isDemoGap(stat, gaps, new Set()));
-  return { stations: core.stations, snapshots: core.snapshots, dailyStats, syncRuns: buildDemoSyncRuns(now) };
+  const dailyStats = core.specs.flatMap((spec) => dailyStatsForStation(spec, now, scenario)).filter((stat) => !isDemoGap(stat, gaps, new Set()));
+  return { stations: core.stations, snapshots: core.snapshots, dailyStats, syncRuns: buildDemoSyncRuns(now, core.stations.length) };
 }

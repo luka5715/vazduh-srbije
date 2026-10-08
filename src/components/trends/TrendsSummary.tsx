@@ -251,7 +251,8 @@ function PeriodStrip({ daily, recentShare, previousShare }: { daily: PollutedDay
           </div>
         ))}
       </div>
-      <div aria-hidden className="tnum flex gap-2 text-[11px] leading-4 text-muted">
+      {/* Legenda polovina: 12 px na telefonu (donja granica tipografije), 11 px od `sm`. */}
+      <div aria-hidden className="tnum flex gap-2 text-[12px] leading-4 text-muted sm:text-[11px]">
         {halves.map((half) => (
           <span key={half.label} className="flex-1 truncate">
             {half.label} · <span className="font-semibold text-ink">{percentOrDash(half.share)}</span>

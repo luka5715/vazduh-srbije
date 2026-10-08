@@ -3,10 +3,11 @@ import type { CSSProperties } from 'react';
 
 import { GlassPanel } from '@/components/fx/GlassPanel';
 import { LiveDot } from '@/components/fx/LiveDot';
+import { backfillEtaText, expectedSyncDuration, syncWindowText, UNMEASURED } from '@/components/sync/runModel';
 import { SyncActions } from '@/components/sync/SyncActions';
-import type { SyncActivity } from '@/hooks/useSync';
+import { SYNC_HOURS_BACK, type SyncActivity } from '@/hooks/useSync';
 import { cn } from '@/lib/cn';
-import { STALE_MINUTES } from '@/lib/syncRules';
+import { HISTORY_DAYS, STALE_MINUTES } from '@/lib/syncRules';
 import { isDemoMode } from '@/services/bootstrap';
 
 export interface EmptyStateProps {
@@ -23,15 +24,19 @@ interface Step {
   kind?: SyncActivity['kind'];
 }
 
+/**
+ * Prazna baza nema ni jedan izmeren posao, pa tekstovi o trajanju ne navode broj
+ * (`UNMEASURED`: „ispod minuta“); stranica Sinhronizacija kasnije pokazuje izmereno trajanje.
+ */
 const STEPS: Step[] = [
   {
     title: 'Preuzmi podatke sa SEPA',
-    text: 'Stanice, trenutno stanje i dnevna statistika za svaki dan koji prozor obuhvata – potpuna za sve dane osim današnjeg, koji se dopunjava svakom sinhronizacijom.',
+    text: `Stanice, trenutno stanje i dnevna statistika za svaki dan koji prozor od ${SYNC_HOURS_BACK} h obuhvata – potpuna za sve dane osim današnjeg, koji se dopunjava svakom sinhronizacijom.`,
     kind: 'sync',
   },
   {
-    title: 'Učitaj istoriju (30 dana)',
-    text: 'Dan po dan, oko minut po danu, od najstarijeg. Možete prekinuti u svakom trenutku – sledeći put se nastavlja od prvog dana koji još nedostaje.',
+    title: `Učitaj istoriju (${HISTORY_DAYS} dana)`,
+    text: `Dan po dan, od najstarijeg, ${backfillEtaText(UNMEASURED, HISTORY_DAYS)}. Možete prekinuti u svakom trenutku – sledeći put se nastavlja od prvog dana koji još nedostaje.`,
     kind: 'backfill',
   },
   {
@@ -58,8 +63,8 @@ export function EmptyState({ activity, onSync, onBackfill, onStop }: EmptyStateP
           </h2>
           <p className="mt-4 max-w-prose text-[15px] leading-6 text-muted">
             „Vazduh Srbije“ čuva merenja državne mreže SEPA u sopstvenoj SQL bazi u Fabric-u, jer javni API pamti samo
-            poslednjih 30 dana. Prvo preuzimanje povlači satne vrednosti za poslednjih 36 sati sa svih aktivnih stanica i
-            traje 1–3 minuta.
+            poslednjih {HISTORY_DAYS} dana. Prvo preuzimanje povlači satne vrednosti za {syncWindowText()} sa svih aktivnih
+            stanica i obično traje {expectedSyncDuration(UNMEASURED)}.
           </p>
           <SyncActions
             className="mt-6 max-w-xl"
@@ -106,7 +111,7 @@ export function EmptyState({ activity, onSync, onBackfill, onStop }: EmptyStateP
                   <p className="flex flex-wrap items-center gap-x-2 font-semibold leading-6 text-ink">
                     <span className="sr-only">Korak {index + 1}: </span>
                     {step.title}
-                    {running ? <span className="font-mono text-[10.5px] font-medium uppercase tracking-[0.1em] text-accent">u toku</span> : null}
+                    {running ? <span className="font-mono text-[12px] font-medium uppercase tracking-[0.1em] text-accent sm:text-[11px]">u toku</span> : null}
                   </p>
                   <p className="mt-1 text-sm leading-5 text-muted">{step.text}</p>
                 </div>

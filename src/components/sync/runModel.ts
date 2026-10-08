@@ -8,8 +8,8 @@ import type { SyncRunRecord } from '@shared/contracts';
 import { summarizeSyncWarnings, warningsFromMessage } from '@shared/syncNotes';
 import { addDays, localDay, todayLocal } from '@shared/time';
 
-import type { SyncOutcome } from '@/hooks/useSync';
-import { formatDayLong, formatDayShort, formatTime } from '@/lib/format';
+import { SYNC_HOURS_BACK, type SyncOutcome } from '@/hooks/useSync';
+import { formatDayLong, formatDayShort, formatDuration, formatInt, formatTime, pluralSr } from '@/lib/format';
 import { liveStatus } from '@/lib/stations';
 import { isRunAbandoned, isRunInvalid, STALE_MINUTES, validRuns } from '@/lib/syncRules';
 
@@ -158,17 +158,24 @@ export interface RunSummary {
   statuses: RunStatus[];
   /** Prosečno trajanje uspešnih sinhronizacija (ms) ili null. */
   avgSyncMs: number | null;
+  /** Prosečno trajanje uspešno učitanog dana istorije (ms) ili null. */
+  avgBackfillMs: number | null;
   /** Najnovija uspešna sinhronizacija u dnevniku. */
   lastOkSync: SyncRunRecord | null;
+}
+
+function average(values: number[]): number | null {
+  return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
 }
 
 export function summarizeRuns(runs: SyncRunRecord[], now: Date): RunSummary {
   const statuses = runs.map((run) => runStatus(run, now));
   const count = (status: RunStatus) => statuses.filter((s) => s === status).length;
-  const durations = runs
-    .filter((run, i) => run.kind === 'sync' && isSuccess(statuses[i]))
-    .map((run) => runDurationMs(run, 'ok'))
-    .filter((ms): ms is number => ms !== null);
+  const durationsOf = (kind: SyncRunRecord['kind']) =>
+    runs
+      .filter((run, i) => run.kind === kind && isSuccess(statuses[i]))
+      .map((run) => runDurationMs(run, 'ok'))
+      .filter((ms): ms is number => ms !== null);
   return {
     total: runs.length,
     ok: count('ok'),
@@ -178,15 +185,115 @@ export function summarizeRuns(runs: SyncRunRecord[], now: Date): RunSummary {
     running: count('running'),
     invalid: count('invalid'),
     statuses: [...statuses].reverse(),
-    avgSyncMs: durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : null,
+    avgSyncMs: average(durationsOf('sync')),
+    avgBackfillMs: average(durationsOf('backfill')),
     lastOkSync: runs.find((run, i) => run.kind === 'sync' && isSuccess(statuses[i])) ?? null,
   };
 }
 
-/** Starost podataka u odnosu na pravilo automatskog osvežavanja (65 min). */
+/**
+ * Očekivano trajanje poslova, izvedeno SAMO iz izmerenih uspešnih poslova u dnevniku. Tekstovi
+ * ispod nikad ne obećavaju trajanje koje podaci ne potvrđuju: bez merenja kažu „ispod minuta“.
+ */
+export interface DurationExpectation {
+  /** Prosečno trajanje uspešne sinhronizacije (ms) ili null kad u dnevniku nema merenja. */
+  syncMs: number | null;
+  /** Prosečno trajanje uspešno učitanog dana istorije (ms) ili null. */
+  backfillMs: number | null;
+}
+
+/** Bez ijednog merenja (prazna baza, prvi ekran). */
+export const UNMEASURED: DurationExpectation = { syncMs: null, backfillMs: null };
+
+/**
+ * Prozor sinhronizacije rečima, sa pravilnim slaganjem broja: „poslednja 72 sata“, „poslednjih
+ * 36 sati“; kratko (uz oznaku) „poslednja 72 h“. Jedino mesto gde se broj sati ispisuje.
+ */
+export function syncWindowText(short = false, hours = SYNC_HOURS_BACK): string {
+  const adjective = pluralSr(hours, 'poslednji', 'poslednja', 'poslednjih');
+  return `${adjective} ${formatInt(hours)} ${short ? 'h' : pluralSr(hours, 'sat', 'sata', 'sati')}`;
+}
+
+/**
+ * Očekivanje iz sažetka dnevnika; kad dnevnik (poslednjih 10 poslova) nema uspešnu sinhronizaciju,
+ * važi poslednja uspešna iz zasebnog upita (`lastSuccessfulSync`).
+ */
+export function durationExpectation(summary: RunSummary, lastOkSync: SyncRunRecord | null = null): DurationExpectation {
+  const syncMs = summary.avgSyncMs ?? (lastOkSync ? runDurationMs(lastOkSync, 'ok') : null);
+  return { syncMs, backfillMs: summary.avgBackfillMs };
+}
+
+/**
+ * Grubo zaokruženo trajanje za procene: „12 s“, do 5 min na 10 s („1 min 30 s“), zatim na minut
+ * („7 min“, „1 h 10 min“). Prosek nikad nije tačan na sekundu, pa ga tekst ne prikazuje tako.
+ */
+export function roughDuration(ms: number): string {
+  const seconds = Math.max(0, ms) / 1000;
+  if (seconds < 60) return `${formatInt(Math.max(1, Math.round(seconds)))} s`;
+  if (seconds < 300) return formatDuration(Math.round(seconds / 10) * 10_000);
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${formatInt(minutes)} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${formatInt(hours)} h ${formatInt(rest)} min` : `${formatInt(hours)} h`;
+}
+
+/** Deo rečenice uz „obično traje …“: „oko 12 s“, bez merenja „ispod minuta“. */
+export function expectedSyncDuration(expectation: DurationExpectation): string {
+  return expectation.syncMs === null ? 'ispod minuta' : `oko ${roughDuration(expectation.syncMs)}`;
+}
+
+/** Uz napredak i pločice: „obično oko 12 s · limit 240 s“ / „obično ispod minuta · limit 240 s“. */
+export function expectedDurationText(expectation: DurationExpectation): string {
+  return `obično ${expectedSyncDuration(expectation)} · limit ${FUNCTION_LIMIT_MS / 1000} s`;
+}
+
+/**
+ * Procena trajanja jednog dana istorije (ms): prosek izmerenih dana istorije; bez njih srazmerno
+ * iz sinhronizacije (dan je 24 h od prozora `SYNC_HOURS_BACK` sati); bez ijednog merenja null.
+ */
+export function backfillDayMs(expectation: DurationExpectation): number | null {
+  if (expectation.backfillMs !== null) return expectation.backfillMs;
+  if (expectation.syncMs !== null) return (expectation.syncMs * 24) / SYNC_HOURS_BACK;
+  return null;
+}
+
+/**
+ * „oko 40 s po danu, ukupno oko 20 min za 30 dana“; bez broja dana samo „oko 40 s po danu“;
+ * bez merenja „obično ispod minuta po danu“.
+ */
+export function backfillEtaText(expectation: DurationExpectation, days: number | null = null): string {
+  const perDay = backfillDayMs(expectation);
+  if (perDay === null) return 'obično ispod minuta po danu';
+  const text = `oko ${roughDuration(perDay)} po danu`;
+  if (!days || days <= 0) return text;
+  return `${text}, ukupno oko ${roughDuration(perDay * days)} za ${formatInt(days)} ${pluralSr(days, 'dan', 'dana', 'dana')}`;
+}
+
+/**
+ * Puna širina trake trajanja u dnevniku: najduži završeni posao u prikazanom dnevniku, a najmanje
+ * minut – da se poslovi od 12 s i 30 s razlikuju (prema limitu od 240 s svi bi bili crtice).
+ */
+export const DURATION_SCALE_MIN_MS = 60_000;
+
+export function durationScaleMs(runs: readonly SyncRunRecord[], now: Date): number {
+  let max = DURATION_SCALE_MIN_MS;
+  for (const run of runs) {
+    const ms = runDurationMs(run, runStatus(run, now));
+    if (ms !== null && ms > max) max = ms;
+  }
+  return max;
+}
+
+/**
+ * Starost podataka u odnosu na prag automatskog osvežavanja (`STALE_MINUTES` = 65 min). Prag je
+ * tvrda granica; `shouldAutoSync` može pokrenuti osvežavanje i ranije, čim SEPA po očekivanju
+ * objavi nov sat (`MIN_GAP_MINUTES` razmak) – merač prikazuje samo prag.
+ */
 export interface Freshness {
   ageMs: number;
   /** 0–1: deo praga od 65 min koji je prošao (1 = treba osvežiti). */
+
   ratio: number;
   stale: boolean;
 }

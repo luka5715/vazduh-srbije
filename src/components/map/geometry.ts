@@ -14,7 +14,7 @@ import { createProjection, featureToPath, isKosovoDistrict, SERBIA_BBOX, type Ge
 export const MAP_WIDTH = 600;
 const MAP_PADDING = 12;
 /** 1° geografske širine ≈ 111,2 km. */
-const KM_PER_DEGREE = 111.2;
+export const KM_PER_DEGREE = 111.2;
 const SCALE_BAR_KM = 50;
 
 export interface DistrictShape {
@@ -106,6 +106,11 @@ export function mapFrame(geometry: MapGeometry, width: number, height: number): 
       ? { x: 0, y: -(w / ratio - h) / 2, w, h: w / ratio }
       : { x: -(h * ratio - w) / 2, y: 0, w: h * ratio, h };
   return buildFrame(geometry, vb);
+}
+
+/** Dužina u viewBox jedinicama → kilometri (projekcija čuva razmeru po obe ose). */
+export function unitsToKm(geometry: Pick<MapGeometry, 'unitsPerLat'>, units: number): number {
+  return (units / geometry.unitsPerLat) * KM_PER_DEGREE;
 }
 
 function buildFrame(geometry: Pick<MapGeometry, 'projection' | 'unitsPerLon' | 'unitsPerLat'>, vb: ViewBox): MapFrame {

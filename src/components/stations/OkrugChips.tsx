@@ -119,7 +119,7 @@ export function OkrugChips({ views, okrugs, okrug, onChange, className }: OkrugC
               )}
             >
               {name ? okrugShort(name) : 'Svi okruzi'}
-              <span className={cn('tnum font-mono text-[11px]', active ? 'text-page/70' : 'text-faint')}>{count}</span>
+              <span className={cn('tnum font-mono text-[12px] sm:text-[11px]', active ? 'text-page/70' : 'text-faint')}>{count}</span>
             </button>
           );
         })}

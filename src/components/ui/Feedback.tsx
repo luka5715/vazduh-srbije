@@ -6,13 +6,36 @@ import { formatTimeSince } from '@/lib/format';
 
 import { Button } from './Button';
 
-export function ErrorBanner({ title, message, onRetry, className }: { title?: string; message: ReactNode; onRetry?: () => void; className?: string }) {
+/**
+ * Greška sa naslovom, ljudskom porukom i „Pokušaj ponovo“. `detail` je sirova poruka greške
+ * (npr. GraphQL tekst) koju sloj podataka izdvoji iz ljudske (`errorDetail`): ostaje dostupna
+ * vlasniku za dijagnostiku pod sklopivim „Detalji“, a ne zatrpava korisnika.
+ */
+export function ErrorBanner({
+  title,
+  message,
+  detail,
+  onRetry,
+  className,
+}: {
+  title?: string;
+  message: ReactNode;
+  detail?: string | null;
+  onRetry?: () => void;
+  className?: string;
+}) {
   return (
     <div role="alert" className={cn('flex flex-wrap items-start gap-3 rounded-ctl border border-danger/30 bg-danger-soft px-3.5 py-3 text-danger-soft-ink', className)}>
       <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
       <div className="min-w-0 flex-1 text-sm leading-5">
         {title ? <p className="font-semibold">{title}</p> : null}
         <p className="break-words">{message}</p>
+        {detail ? (
+          <details className="mt-1">
+            <summary className="cursor-pointer text-[12.5px] underline-offset-2 hover:underline">Detalji</summary>
+            <p className="sync-stamp mt-1 break-words font-mono leading-4 opacity-90">{detail}</p>
+          </details>
+        ) : null}
       </div>
       {onRetry ? (
         <Button size="sm" variant="secondary" onClick={onRetry} className="ml-auto">

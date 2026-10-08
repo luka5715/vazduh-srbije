@@ -369,6 +369,33 @@ describe('okruzi', () => {
     expect(stationsWithoutOkrug([kg])).toBe(0);
   });
 
+  it('opštine iz žive SEPA mreže: Sokobanja je u Zaječarskom okrugu, naselja stanica imaju okrug', () => {
+    const views = make([
+      { id: 'sb', name: 'Sokobanja', municipality: 'Sokobanja', series: { PM10: flat(20) } },
+      { id: 'bo', name: 'Beograd Borča', municipality: 'Borča', series: { PM10: flat(20) } },
+      { id: 'se', name: 'Užice Sevojno', municipality: 'Sevojno', series: { PM10: flat(20) } },
+      { id: 'kv', name: 'Kamenički vis', municipality: 'Kamenički vis', series: { PM10: flat(20) } },
+      // Gradska opština Niša; SEPA je piše malim „k“ – indeks se čita bez obzira na veličinu slova.
+      { id: 'ck', name: 'Niš Crveni krst', municipality: 'Crveni krst', series: { PM10: flat(20) } },
+      // Golo „Palilula“ ostaje gradska opština NIŠA: beogradske stanice SEPA vodi pod opštinom
+      // „Beograd“ (npr. Beograd Borča), pa golo „Palilula“ u živoj mreži znači Niš.
+      { id: 'pa', name: 'Niš Palilula', municipality: 'Palilula', series: { PM10: flat(20) } },
+      { id: 'bg', name: 'Beograd Vračar', municipality: 'Beograd', series: { PM10: flat(20) } },
+    ]);
+    const byId = Object.fromEntries(views.map((view) => [view.id, view]));
+    expect(okrugOf(byId.sb)).toBe('Zaječarski');
+    expect(okrugOf(byId.bo)).toBe('Grad Beograd');
+    expect(okrugOf(byId.se)).toBe('Zlatiborski okrug');
+    expect(okrugOf(byId.kv)).toBe('Nišavski okrug');
+    expect(okrugOf(byId.ck)).toBe('Nišavski okrug');
+    expect(okrugOf(byId.pa)).toBe('Nišavski okrug');
+    expect(okrugOf(byId.bg)).toBe('Grad Beograd');
+    expect(stationsWithoutOkrug(views)).toBe(0);
+    // Sokobanja i naselja imaju sopstvene (približne) koordinate, ne centar Niša.
+    expect(byId.sb.position).toMatchObject({ approximate: true, lat: 43.642, lon: 21.871 });
+    expect(byId.bo.position?.lat).toBeGreaterThan(44.8);
+  });
+
   it('stanice bez okruga se broje (samo aktivne)', () => {
     expect(stationsWithoutOkrug(views)).toBe(1);
     const withRetired = make([
@@ -479,14 +506,17 @@ describe('format: koncentracije, promene, sati', () => {
 describe('liveStatus', () => {
   const hour = new Date('2026-10-07T14:00:00Z'); // 16–17 h po Beogradu
 
-  it('uživo dok se interval nije završio pre više od 3 h; uvek sa starošću', () => {
-    expect(liveStatus(hour, new Date('2026-10-07T16:40:00Z'))).toEqual({ live: true, label: '16–17 h', ageText: 'pre 3 h' });
-    expect(liveStatus(hour, new Date('2026-10-07T18:00:00Z')).live).toBe(true);
+  it('uživo dok se interval nije završio pre više od 3 h; starost se računa od kraja intervala', () => {
+    // Interval 16–17 h se završio u 17:00 (15:00Z): u 18:40 lokalno je star 1 h 40 min → „pre 2 h“.
+    expect(liveStatus(hour, new Date('2026-10-07T16:40:00Z'))).toEqual({ live: true, label: '16–17 h', ageText: 'pre 2 h' });
+    // 28 min posle zatvaranja intervala čip kaže „pre 28 min“, ne „pre 1 h“ (živi slučaj 0–1 h u 01:28).
+    expect(liveStatus(hour, new Date('2026-10-07T15:28:00Z'))).toEqual({ live: true, label: '16–17 h', ageText: 'pre 28 min' });
+    expect(liveStatus(hour, new Date('2026-10-07T18:00:00Z'))).toEqual({ live: true, label: '16–17 h', ageText: 'pre 3 h' });
     expect(liveStatus(hour, new Date('2026-10-07T18:01:00Z')).live).toBe(false);
   });
 
   it('sat iz prethodnog dana nosi datum; bez merenja nema „uživo“', () => {
-    expect(liveStatus(hour, new Date('2026-10-08T01:00:00Z'))).toEqual({ live: false, label: '07. 10. 16–17 h', ageText: 'pre 11 h' });
+    expect(liveStatus(hour, new Date('2026-10-08T01:00:00Z'))).toEqual({ live: false, label: '07. 10. 16–17 h', ageText: 'pre 10 h' });
     expect(liveStatus(null, new Date())).toEqual({ live: false, label: '–', ageText: '' });
   });
 });

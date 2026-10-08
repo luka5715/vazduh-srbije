@@ -1,6 +1,7 @@
 import { CircleAlert, CircleDashed, CircleHelp, Info, TriangleAlert } from 'lucide-react';
 
 import type { SyncRunRecord } from '@shared/contracts';
+import { summarizeSyncWarnings, unwrittenRowsWarning, warningsFromMessage } from '@shared/syncNotes';
 
 import { cn } from '@/lib/cn';
 import { describeSyncError } from '@/lib/errors';
@@ -10,6 +11,7 @@ import { RunStatusBadge, RunStatusNode } from './RunStatus';
 import {
   ABANDONED_NOTE,
   backfillDayOf,
+  durationScaleMs,
   FUNCTION_LIMIT_MS,
   groupRunsByDay,
   INVALID_NOTE,
@@ -31,14 +33,18 @@ function runTitle(run: SyncRunRecord): string {
 }
 
 /**
- * Trajanje prema limitu funkcije od 240 s: tekst + tanka traka sa crticom limita. Koren je
- * JEDINI omotač para dt/dd unutar `<dl>` (klase rasporeda idu kroz `className`).
+ * Trajanje: tekst + tanka traka. Puna traka je najduži završeni posao u prikazanom dnevniku
+ * (najmanje 60 s, `durationScaleMs`), pa se poslovi od 12 s i 30 s razlikuju; kraj staze nosi tu
+ * skalu. Napušten posao je puna šrafirana traka, greška je crvena; žuto tek iznad 75 % limita
+ * funkcije (240 s), koji ostaje tekst u pločici heroja. Koren je JEDINI omotač para dt/dd unutar
+ * `<dl>` (klase rasporeda idu kroz `className`).
  */
-function DurationMeter({ run, status, className }: { run: SyncRunRecord; status: RunStatus; className?: string }) {
+function DurationMeter({ run, status, scaleMs, className }: { run: SyncRunRecord; status: RunStatus; scaleMs: number; className?: string }) {
   const ms = runDurationMs(run, status);
-  const ratio = ms === null ? (status === 'abandoned' ? 1 : 0) : Math.min(1, ms / FUNCTION_LIMIT_MS);
+  const ratio = ms === null ? (status === 'abandoned' ? 1 : 0) : Math.min(1, ms / scaleMs);
   const text = ms !== null ? formatDuration(ms) : status === 'abandoned' ? 'bez završetka' : status === 'running' ? 'u toku…' : '–';
-  const tone = status === 'abandoned' ? 'var(--warn)' : status === 'error' ? 'var(--danger)' : ratio > 0.75 ? 'var(--warn)' : 'var(--accent)';
+  const slow = ms !== null && ms > FUNCTION_LIMIT_MS * 0.75;
+  const tone = status === 'abandoned' ? 'var(--warn)' : status === 'error' ? 'var(--danger)' : slow ? 'var(--warn)' : 'var(--accent)';
   return (
     <div className={cn('min-w-0', className)}>
       <dt className="eyebrow !leading-4">Trajanje</dt>
@@ -46,14 +52,16 @@ function DurationMeter({ run, status, className }: { run: SyncRunRecord; status:
         <span className="tnum whitespace-nowrap text-[14px] font-semibold text-ink">{text}</span>
         <span
           aria-hidden
+          data-testid="duration-bar"
+          data-ratio={ratio.toFixed(3)}
           className={cn('relative h-1.5 min-w-12 flex-1 rounded-full bg-grid', status === 'running' && 'sync-indeterminate')}
-          title={`Limit funkcije: ${FUNCTION_LIMIT_MS / 1000} s`}
+          title={`Puna traka: ${formatDuration(scaleMs)} (najduži posao u dnevniku); limit funkcije ${FUNCTION_LIMIT_MS / 1000} s`}
         >
           {status !== 'running' && ratio > 0 ? (
             <span
               className="absolute inset-y-0 left-0 rounded-full"
               style={{
-                width: `${Math.max(4, ratio * 100)}%`,
+                width: `${Math.max(3, ratio * 100)}%`,
                 background:
                   status === 'abandoned'
                     ? `repeating-linear-gradient(135deg, ${tone} 0 4px, color-mix(in oklab, ${tone} 35%, transparent) 4px 7px)`
@@ -63,7 +71,7 @@ function DurationMeter({ run, status, className }: { run: SyncRunRecord; status:
           ) : null}
           <span className="absolute -top-1 right-0 h-3.5 w-px bg-border-strong" />
         </span>
-        <span className="whitespace-nowrap font-mono text-[11px] text-faint">240 s</span>
+        <span className="sync-fine whitespace-nowrap font-mono text-faint">{formatDuration(scaleMs)}</span>
       </dd>
     </div>
   );
@@ -86,7 +94,7 @@ function RunNote({ run, status }: { run: SyncRunRecord; status: RunStatus }) {
         <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
         <p className="min-w-0">
           {ABANDONED_NOTE}
-          {message ? <span className="mt-0.5 block break-words font-mono text-[11.5px] opacity-90">{message}</span> : null}
+          {message ? <span className="sync-stamp mt-0.5 block break-words font-mono opacity-90">{message}</span> : null}
         </p>
       </div>
     );
@@ -97,23 +105,36 @@ function RunNote({ run, status }: { run: SyncRunRecord; status: RunStatus }) {
         <CircleHelp aria-hidden className="mt-0.5 size-3.5 shrink-0" />
         <p className="min-w-0">
           {INVALID_NOTE}
-          {message ? <span className="mt-0.5 block break-words font-mono text-[11.5px] opacity-90">{message}</span> : null}
+          {message ? <span className="sync-stamp mt-0.5 block break-words font-mono opacity-90">{message}</span> : null}
         </p>
       </div>
     );
   }
   if (status === 'partial') {
     const missing = runMissingStations(run);
+    // Posao je „Delimično“ i kad nijedna stanica ne nedostaje, a redovi nisu upisani ni posle
+    // ponovnog pokušaja (`N redova nije upisano u bazu`, vidi syncNotes) – tada je to glavni razlog.
+    const { unwrittenRows } = summarizeSyncWarnings(warningsFromMessage(run.message).warnings);
+    const unwrittenText = unwrittenRowsWarning(unwrittenRows);
     return (
       <div className="mt-3 flex gap-2 rounded-ctl border border-warn/30 bg-warn-soft px-3 py-2 text-[13px] leading-5 text-warn-soft-ink">
         <CircleDashed aria-hidden className="mt-0.5 size-3.5 shrink-0" />
         <p className="min-w-0">
-          <span className="font-semibold">
-            {missing.atLeast ? 'Najmanje ' : ''}
-            {formatInt(missing.count)} {stationsNoun(missing.count)} bez novih merenja
-          </span>{' '}
-          – izvor nije odgovorio ili je posao stigao do vremenskog limita; te stanice zadržavaju ranije podatke.
-          {message ? <span className="mt-0.5 block break-words font-mono text-[11.5px] opacity-90">{message}</span> : null}
+          {missing.count > 0 ? (
+            <>
+              <span className="font-semibold">
+                {missing.atLeast ? 'Najmanje ' : ''}
+                {formatInt(missing.count)} {stationsNoun(missing.count)} bez novih merenja
+              </span>{' '}
+              – izvor nije odgovorio ili je posao stigao do vremenskog limita; te stanice zadržavaju ranije podatke.
+              {unwrittenRows > 0 ? ` Uz to ${unwrittenText} – prolazna greška baze; sledeća sinhronizacija ih piše ponovo.` : null}
+            </>
+          ) : (
+            <>
+              <span className="font-semibold">{unwrittenText}</span> – prolazna greška baze; sledeća sinhronizacija ih piše ponovo.
+            </>
+          )}
+          {message ? <span className="sync-stamp mt-0.5 block break-words font-mono opacity-90">{message}</span> : null}
         </p>
       </div>
     );
@@ -126,7 +147,7 @@ function RunNote({ run, status }: { run: SyncRunRecord; status: RunStatus }) {
         <CircleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
         <p className="min-w-0">
           <span className="font-semibold">{title}</span>
-          <span className="mt-0.5 block break-words font-mono text-[11.5px] opacity-90">{message}</span>
+          <span className="sync-stamp mt-0.5 block break-words font-mono opacity-90">{message}</span>
         </p>
       </div>
     );
@@ -139,7 +160,7 @@ function RunNote({ run, status }: { run: SyncRunRecord; status: RunStatus }) {
   );
 }
 
-function TimelineItem({ run, now, last, newest }: { run: SyncRunRecord; now: Date; last: boolean; newest: boolean }) {
+function TimelineItem({ run, now, scaleMs, last, newest }: { run: SyncRunRecord; now: Date; scaleMs: number; last: boolean; newest: boolean }) {
   const status = runStatus(run, now);
   const started = new Date(run.startedAt);
   // Vreme događaja je završetak posla (kao „Osveženo pre …“); posao bez završetka – početak.
@@ -154,7 +175,7 @@ function TimelineItem({ run, now, last, newest }: { run: SyncRunRecord; now: Dat
         <header className="flex min-h-7 flex-wrap items-center gap-x-2.5 gap-y-1">
           <h3 className="text-[14.5px] font-semibold leading-5 text-ink">{runTitle(run)}</h3>
           <RunStatusBadge status={status} />
-          <p className="w-full whitespace-nowrap font-mono text-[11.5px] leading-5 text-muted sm:ml-auto sm:w-auto" title={timeTitle}>
+          <p className="sync-stamp w-full whitespace-nowrap font-mono leading-5 text-muted sm:ml-auto sm:w-auto" title={timeTitle}>
             <span className="sr-only">{finished ? 'Završeno ' : 'Pokrenuto '}</span>
             {Number.isNaN(at.getTime()) ? (
               'bez vremena'
@@ -182,7 +203,7 @@ function TimelineItem({ run, now, last, newest }: { run: SyncRunRecord; now: Dat
           <Metric label="Stanice" value={run.stationsSeen} />
           <Metric label="Merenja" value={run.observationsSeen} />
           <Metric label="Redova" value={run.rowsWritten} />
-          <DurationMeter run={run} status={status} className="col-span-3 sm:col-span-1" />
+          <DurationMeter run={run} status={status} scaleMs={scaleMs} className="col-span-3 sm:col-span-1" />
         </dl>
         <RunNote run={run} status={status} />
       </article>
@@ -190,9 +211,10 @@ function TimelineItem({ run, now, last, newest }: { run: SyncRunRecord; now: Dat
   );
 }
 
-/** Vertikalna vremenska linija poslova, grupisana po danu (najnoviji prvi). */
+/** Vertikalna vremenska linija poslova, grupisana po danu (najnoviji prvi); trake trajanja dele skalu. */
 export function RunTimeline({ runs, now, className }: { runs: SyncRunRecord[]; now: Date; className?: string }) {
   const groups = groupRunsByDay(runs, now);
+  const scaleMs = durationScaleMs(runs, now);
   return (
     <ol className={cn('flex flex-col gap-6', className)} aria-label={`Poslednjih ${formatInt(runs.length)} poslova sinhronizacije`}>
       {groups.map((group, groupIndex) => (
@@ -206,7 +228,7 @@ export function RunTimeline({ runs, now, className }: { runs: SyncRunRecord[]; n
           </p>
           <ol className="flex flex-col">
             {group.runs.map((run, index) => (
-              <TimelineItem key={run.id} run={run} now={now} last={index === group.runs.length - 1} newest={groupIndex === 0 && index === 0} />
+              <TimelineItem key={run.id} run={run} now={now} scaleMs={scaleMs} last={index === group.runs.length - 1} newest={groupIndex === 0 && index === 0} />
             ))}
           </ol>
         </li>

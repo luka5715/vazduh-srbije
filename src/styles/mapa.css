@@ -311,6 +311,42 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* Traka izabrane stanice (ispod xl; vidi map/selectedStrip.ts)         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Telefon (< 1024 px, donja navigacija): traka lebdi iznad donje navigacije dok su detalji
+ * ispod ekrana. `--bottomnav-h` meri AppShell i UKLJUČUJE env(safe-area-inset-bottom) (to je
+ * donji razmak same trake); bez mere važi rezerva 64 px + sigurna zona (48 px na položenom
+ * telefonu, vidi BottomNav). Uspon pri pojavi gasi globalni blok za smanjeno kretanje (main.css).
+ * Dok traka postoji, MapView objavljuje njenu visinu + 8 px kao `--map-strip-h` na `<html>`, pa
+ * plutajuće obaveštenje sinhronizacije (SyncToast) staje iznad nje.
+ */
+.map-strip--fixed {
+  position: fixed;
+  left: max(16px, env(safe-area-inset-left));
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(var(--bottomnav-h, calc(64px + env(safe-area-inset-bottom))) + 8px);
+  z-index: 30;
+  max-width: 640px;
+  margin-inline: auto;
+  animation: map-strip-in 0.24s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+
+@media (max-width: 1023px) and (max-height: 500px) {
+  .map-strip--fixed {
+    bottom: calc(var(--bottomnav-h, calc(48px + env(safe-area-inset-bottom))) + 8px);
+  }
+}
+
+@keyframes map-strip-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Detalji stanice                                                     */
 /* ------------------------------------------------------------------ */
 

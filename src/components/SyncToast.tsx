@@ -2,7 +2,9 @@ import { LoaderCircle, Square, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { OUTCOME_STYLE } from '@/components/sync/outcomeStyle';
+import { expectedSyncDuration } from '@/components/sync/runModel';
 import { BackfillProgress, KeepScreenOnNote, SyncProgress } from '@/components/sync/SyncActions';
+import { useDurationExpectation } from '@/components/sync/useDurationExpectation';
 import { formatElapsed, useElapsed } from '@/components/sync/useElapsed';
 import { Button } from '@/components/ui/Button';
 import type { OutcomeTone, SyncActivity, SyncOutcome } from '@/hooks/useSync';
@@ -118,18 +120,21 @@ function Countdown({ paused, tone }: { paused: boolean; tone: Tone }) {
   );
 }
 
+/** Napredak sinhronizacije: očekivano trajanje iz izmerenih poslova („obično traje oko 12 s“), bez merenja „ispod minuta“. */
 function SyncActivityToast({ activity }: { activity: Extract<SyncActivity, { kind: 'sync' }> }) {
   const elapsed = useElapsed(activity.startedAt);
+  const expectation = useDurationExpectation();
   return (
     <ToastFrame
       tone="progress"
       title={activity.auto ? 'Automatsko osvežavanje podataka' : 'Preuzimam podatke sa SEPA…'}
       detail={
         <>
-          Funkcija radi na serveru; obično traje 1–3 minuta. <span className="tnum whitespace-nowrap font-mono text-ink">{formatElapsed(elapsed)}</span>
+          Funkcija radi na serveru; obično traje {expectedSyncDuration(expectation)}.{' '}
+          <span className="tnum whitespace-nowrap font-mono text-ink">{formatElapsed(elapsed)}</span>
         </>
       }
-      footer={<SyncProgress activity={activity} compact />}
+      footer={<SyncProgress activity={activity} expectation={expectation} compact />}
     />
   );
 }
@@ -166,9 +171,11 @@ export function SyncToast({ activity, outcome, onDismiss, onStop, hideActivity =
   if (!showActivity && (!outcome || activity)) return null;
 
   return (
-    // Telefon: iznad donje navigacije (64 px + sigurna zona; položen telefon 48 px); desktop:
-    // donji desni ugao. Bočni razmak poštuje zarez položenog telefona.
-    <div className="pointer-events-none fixed inset-x-0 bottom-[calc(80px+env(safe-area-inset-bottom))] z-50 flex justify-center px-safe-4 short:bottom-[calc(60px+env(safe-area-inset-bottom))] sm:justify-end sm:px-safe-6 lg:bottom-6">
+    // Telefon: iznad donje navigacije (izmerena `--bottomnav-h` iz AppShell-a, uključuje sigurnu
+    // zonu; rezerva 64 px + zona, položen telefon 48 px) i iznad fiksne trake izabrane stanice na
+    // Mapi (`--map-strip-h`, postavlja MapView dok traka postoji); desktop: donji desni ugao.
+    // Bočni razmak poštuje zarez položenog telefona.
+    <div className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--bottomnav-h,calc(64px+env(safe-area-inset-bottom)))+16px+var(--map-strip-h,0px))] z-50 flex justify-center px-safe-4 short:bottom-[calc(var(--bottomnav-h,calc(48px+env(safe-area-inset-bottom)))+12px+var(--map-strip-h,0px))] sm:justify-end sm:px-safe-6 lg:bottom-6">
       {showActivity ? (
         activity.kind === 'sync' ? (
           <SyncActivityToast activity={activity} />

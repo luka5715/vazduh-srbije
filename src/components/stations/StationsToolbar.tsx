@@ -159,7 +159,7 @@ export function GroupFilter({
             >
               <CategoryDot rank={typeof entry.group === 'number' ? entry.group : null} size={8} />
               {groupLabel(entry.group)}
-              <span className={cn('tnum font-mono text-[11px]', pressed ? 'text-ink' : 'text-faint')}>{entry.count}</span>
+              <span className={cn('tnum font-mono text-[12px] sm:text-[11px]', pressed ? 'text-ink' : 'text-faint')}>{entry.count}</span>
             </button>
           );
         })}
@@ -387,7 +387,7 @@ export function StationsToolbar(props: StationsToolbarProps) {
               aria-expanded={helpOpen}
               aria-controls={helpId}
               onClick={() => setHelpOpen((open) => !open)}
-              className="touch-target inline-flex h-6 items-center gap-1 rounded-full border border-border px-2 text-[11px] font-medium text-muted transition-colors hover:text-ink sm:hidden"
+              className="touch-target inline-flex h-6 items-center gap-1 rounded-full border border-border px-2 text-[12px] font-medium text-muted transition-colors hover:text-ink sm:hidden"
             >
               <Info aria-hidden className="size-3" />
               Kako čitati

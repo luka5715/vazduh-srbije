@@ -5,7 +5,9 @@ import { GlassPanel } from '@/components/fx/GlassPanel';
 import { SectionHeader } from '@/components/ui/Card';
 import { useVisibility } from '@/hooks/useVisibility';
 import { cn } from '@/lib/cn';
-import { STALE_MINUTES } from '@/lib/syncRules';
+import { HISTORY_DAYS, STALE_MINUTES } from '@/lib/syncRules';
+
+import { syncWindowText } from './runModel';
 
 import './sync.css';
 
@@ -23,14 +25,14 @@ interface FlowStep {
 }
 
 const NODES: FlowNode[] = [
-  { icon: CloudDownload, title: 'SEPA', tag: 'Kosava Open Data API', text: 'Satni proseci automatskih stanica, preliminarni; izvor čuva 30 dana.' },
+  { icon: CloudDownload, title: 'SEPA', tag: 'Kosava Open Data API', text: `Satni proseci automatskih stanica, preliminarni; izvor čuva ${HISTORY_DAYS} dana.` },
   { icon: Cpu, title: 'Fabric funkcija', tag: 'syncAirQuality · backfillDay', text: 'Radi na serveru, najviše 240 s po pozivu.' },
   { icon: Database, title: 'Baza', tag: 'SQL baza u Fabric-u', text: 'Trajno čuva stanice, snimke stanja i dnevnu statistiku.' },
   { icon: MonitorSmartphone, title: 'Aplikacija', tag: 'Vazduh Srbije', text: 'Čita bazu: pregled, mapa, stanice i trendovi.' },
 ];
 
 const STEPS: FlowStep[] = [
-  { verb: 'Preuzimanje', text: 'poslednjih 36 h ili jedan ceo dan istorije' },
+  { verb: 'Preuzimanje', text: `${syncWindowText(true)} ili jedan ceo dan istorije` },
   { verb: 'Upis', text: 'snimci stanja i dnevna statistika po danu' },
   { verb: 'Čitanje', text: `osvežava se sama kad su podaci stariji od ${STALE_MINUTES} min` },
 ];
@@ -41,7 +43,7 @@ const RULES: Array<{ value: string; text: string }> = [
     value: 'ceo dan',
     text: 'Dnevna statistika učitanog prošlog dana pokriva ceo dan; današnji dan se dopunjava svakom sinhronizacijom.',
   },
-  { value: '30 dana', text: 'Koliko izvor pamti: dan koji nedostaje dopunite pre nego što istekne („Dopuni nedostajuće dane“).' },
+  { value: `${HISTORY_DAYS} dana`, text: 'Koliko izvor pamti: dan koji nedostaje dopunite pre nego što istekne („Dopuni nedostajuće dane“).' },
 ];
 
 /**
@@ -78,7 +80,7 @@ export function DataFlow({ className, style }: { className?: string; style?: CSS
                 <div className="min-w-0">
                   <p className="flex flex-wrap items-baseline gap-x-2">
                     <span className="font-heading text-[15px] font-semibold leading-5 text-ink">{node.title}</span>
-                    <span className="font-mono text-[11px] leading-5 text-muted">{node.tag}</span>
+                    <span className="font-mono text-[12px] leading-5 text-muted sm:text-[11px]">{node.tag}</span>
                   </p>
                   <p className="mt-0.5 text-[13px] leading-5 text-muted">{node.text}</p>
                 </div>
@@ -91,7 +93,7 @@ export function DataFlow({ className, style }: { className?: string; style?: CSS
                     </span>
                   </span>
                   <p className="flex items-center gap-2 py-2 text-[12.5px] leading-5 text-muted">
-                    <span aria-hidden className="grid size-5 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-[10.5px] font-medium text-ink">
+                    <span aria-hidden className="grid size-5 shrink-0 place-items-center rounded-full border border-border-strong font-mono text-[12px] font-medium text-ink sm:text-[10.5px]">
                       {index + 1}
                     </span>
                     <span className="min-w-0">

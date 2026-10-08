@@ -75,7 +75,7 @@ export function RowChip({ row, className }: { row: StationRow; className?: strin
     return (
       <span
         title="SEPA je stanicu označila kao neaktivnu: ne broji se u mrežu, a njena istorija ostaje u Trendovima."
-        className={cn('inline-flex h-5 items-center gap-1 whitespace-nowrap rounded-full border border-dashed border-border-strong px-1.5 text-[11px] font-medium text-muted', className)}
+        className={cn('inline-flex h-5 items-center gap-1 whitespace-nowrap rounded-full border border-dashed border-border-strong px-1.5 text-[12px] font-medium text-muted sm:text-[11px]', className)}
       >
         <PowerOff aria-hidden className="size-3" />
         Neaktivna
@@ -159,7 +159,7 @@ export function StationMeta({ row, latest, className }: { row: StationRow; lates
       <span className="min-w-0 truncate">{place}</span>
       {view.position?.approximate ? (
         <span
-          className="inline-flex h-[18px] shrink-0 items-center gap-1 rounded-full border border-dashed border-border-strong px-1.5 text-[11px] leading-none text-muted"
+          className="inline-flex h-[18px] shrink-0 items-center gap-1 rounded-full border border-dashed border-border-strong px-1.5 text-[12px] leading-none text-muted sm:text-[11px]"
           title="Stanica nema koordinate – na mapi je prikazana u centru opštine."
         >
           <MapPinned aria-hidden className="size-3" />
@@ -173,7 +173,7 @@ export function StationMeta({ row, latest, className }: { row: StationRow; lates
       ) : null}
       {!stale && row.lagHours >= LAG_NOTE_HOURS && view.observedAt ? (
         <span
-          className="inline-flex h-[18px] shrink-0 items-center gap-1 rounded-full bg-warn-soft px-1.5 text-[11px] leading-none text-warn-soft-ink"
+          className="inline-flex h-[18px] shrink-0 items-center gap-1 rounded-full bg-warn-soft px-1.5 text-[12px] leading-none text-warn-soft-ink sm:text-[11px]"
           title={`Poslednje merenje ${formatHourInterval(view.observedAt)}${latest ? `, najnoviji sat mreže je ${formatHourInterval(latest)}` : ''}.`}
         >
           <Clock aria-hidden className="size-3" />

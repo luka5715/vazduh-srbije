@@ -92,7 +92,7 @@ export function NetworkTrend({ daily, className, style }: NetworkTrendProps) {
         {state.status === 'loading' ? (
           <TrendSkeleton />
         ) : state.status === 'error' ? (
-          <ErrorBanner title="Trend mreže nije učitan" message={state.error ?? 'Nepoznata greška'} onRetry={state.reload} />
+          <ErrorBanner title="Trend mreže nije učitan" message={state.error ?? 'Nepoznata greška'} detail={state.errorDetail} onRetry={state.reload} />
         ) : !hasAny ? (
           <EmptyNote className="flex-wrap">
             {okrug ? `Nema dnevne statistike za ${scope}.` : 'Još nema dnevne statistike.'}{' '}

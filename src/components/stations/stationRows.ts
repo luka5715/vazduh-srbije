@@ -237,6 +237,20 @@ function byName(a: StationRow, b: StationRow): number {
   return a.view.station.name.localeCompare(b.view.station.name, 'sr-Latn');
 }
 
+/** Kartice na telefonu: koliko ih je odmah vidljivo (ostatak iza dugmeta „+N stanica“). */
+export const CARD_LIMIT = 20;
+
+/**
+ * Isečak kartica za telefon: bez filtera i pretrage (`capped`) prvih `CARD_LIMIT`, ostale tek
+ * posle „+N stanica“ (`expanded`); sa filterom ili pretragom lista je ionako kratka i cela.
+ * `collapsible` – prikazano je sve iako je lista duža od ograničenja („Prikaži manje“).
+ */
+export function cardSlice<T>(rows: T[], { capped, expanded }: { capped: boolean; expanded: boolean }): { shown: T[]; hidden: number; collapsible: boolean } {
+  if (!capped || rows.length <= CARD_LIMIT) return { shown: rows, hidden: 0, collapsible: false };
+  if (expanded) return { shown: rows, hidden: 0, collapsible: true };
+  return { shown: rows.slice(0, CARD_LIMIT), hidden: rows.length - CARD_LIMIT, collapsible: false };
+}
+
 /**
  * Sortira redove. Po nazivu: čisto abecedno (i zastarele stanice). Po broju: sveže stanice
  * sa vrednošću po izabranom smeru, zatim sveže bez vrednosti, pa zastarele i na kraju

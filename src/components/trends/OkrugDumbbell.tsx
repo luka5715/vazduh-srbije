@@ -181,7 +181,7 @@ function DumbbellLegend({ parameter }: { parameter: Parameter }) {
         boja tačke = kategorija
       </li>
       <li className="inline-flex items-center gap-1.5">
-        <span className="font-mono text-[11px] text-faint">st.</span>
+        <span className="font-mono text-[12px] text-faint sm:text-[11px]">st.</span>
         broj stanica u medijani
       </li>
     </ul>

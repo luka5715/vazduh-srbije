@@ -1,0 +1,114 @@
+import { classify, THRESHOLDS_1H } from '@shared/aqi';
+import { parseSnapshotRecord } from '@shared/aggregate';
+import { describe, expect, it } from 'vitest';
+
+import { buildDemoCore, buildDemoSyncRuns, buildSpecs, SMOG_PM10_MEDIAN, smogRamp, type DemoCore } from './fixture';
+
+/** Različita doba dana (UTC): oblik epizode ne sme da zavisi od sata u kom se demo otvori. */
+const TIMES = ['2026-10-07T02:30:00Z', '2026-10-07T09:10:00Z', '2026-10-07T13:45:00Z', '2026-10-07T18:20:00Z', '2026-10-07T22:05:00Z'];
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/** Sveže stanice (snimak u poslednjih 6 h): PM10 i najgora kategorija iz snimka. */
+function freshSnapshots(core: DemoCore, now: Date) {
+  return core.snapshots
+    .filter((snapshot) => now.getTime() - new Date(snapshot.observedAt).getTime() <= 6 * 3_600_000)
+    .map((snapshot) => {
+      const { values } = parseSnapshotRecord(snapshot);
+      return { pm10: values.PM10?.v ?? null, rank: snapshot.category };
+    });
+}
+
+/** Rastojanje po velikom krugu, km. */
+function distanceKm(a: { lat: number; lon: number }, b: { lat: number; lon: number }): number {
+  const rad = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * rad;
+  const dLon = (b.lon - a.lon) * rad;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(h));
+}
+
+describe('demo fixture – podrazumevani skup', () => {
+  it('26 stanica, sve jasno označene kao demo; scenario `default` je isti skup', () => {
+    const now = new Date(TIMES[0]);
+    const core = buildDemoCore(now);
+    expect(core.stations).toHaveLength(26);
+    for (const station of core.stations) expect(station.name).toMatch(/^Demo stanica /);
+    expect(buildDemoCore(now, 'default')).toEqual(core);
+    expect(buildDemoSyncRuns(now)[0].stationsSeen).toBe(26);
+  });
+
+  it('scenario `late` i `empty` ne menjaju oblik podataka (isti specs)', () => {
+    expect(buildSpecs('late')).toEqual(buildSpecs());
+    expect(buildSpecs('empty')).toEqual(buildSpecs());
+  });
+});
+
+describe('scenario `smog` – izmišljena epizoda smoga', () => {
+  it('rampa po satima unazad: poslednja 24 h vrhunac, slabije do 96 h, ranije ništa', () => {
+    expect(smogRamp(0)).toBe(1);
+    expect(smogRamp(23)).toBe(1);
+    expect(smogRamp(24)).toBeLessThan(1);
+    expect(smogRamp(24)).toBeGreaterThan(smogRamp(48));
+    expect(smogRamp(48)).toBeGreaterThan(smogRamp(72));
+    expect(smogRamp(72)).toBeGreaterThan(0);
+    expect(smogRamp(96)).toBe(0);
+    expect(smogRamp(500)).toBe(0);
+  });
+
+  it.each(TIMES)('u %s: medijana PM10 svežih stanica ≈ 300 (±20 %), bar 70 % stanica je „Veoma zagađen“ ili „Opasan“', (iso) => {
+    const now = new Date(iso);
+    const core = buildDemoCore(now, 'smog');
+    const fresh = freshSnapshots(core, now);
+    expect(fresh.length).toBeGreaterThanOrEqual(24);
+    const pm10 = fresh.map((s) => s.pm10).filter((v): v is number => v !== null);
+    const med = median(pm10);
+    expect(med).toBeGreaterThanOrEqual(SMOG_PM10_MEDIAN * 0.8);
+    expect(med).toBeLessThanOrEqual(SMOG_PM10_MEDIAN * 1.2);
+    // Medijana je iznad poslednjeg SEPA praga za PM10 → najjača izmaglica.
+    expect(med).toBeGreaterThan(THRESHOLDS_1H.PM10[4]);
+    expect(classify('PM10', med)).toBe(5);
+    const severe = fresh.filter((s) => s.rank >= 4).length;
+    expect(severe / fresh.length).toBeGreaterThanOrEqual(0.7);
+    // Nije cela mreža ista: ravnica ostaje ispod „Veoma zagađen“ (mešovite kategorije).
+    expect(fresh.some((s) => s.rank <= 3)).toBe(true);
+  });
+
+  it('isti broj i nazivi stanica kao podrazumevani demo (menja se samo vazduh)', () => {
+    const now = new Date(TIMES[1]);
+    const smog = buildDemoCore(now, 'smog');
+    const base = buildDemoCore(now);
+    expect(smog.stations.map((s) => s.name)).toEqual(base.stations.map((s) => s.name));
+    const smogMedian = median(freshSnapshots(smog, now).map((s) => s.pm10 ?? 0));
+    const baseMedian = median(freshSnapshots(base, now).map((s) => s.pm10 ?? 0));
+    expect(smogMedian).toBeGreaterThan(baseMedian * 3);
+  });
+});
+
+describe('scenario `beograd` – gust klaster', () => {
+  it('devet izmišljenih beogradskih stanica u krugu od 12 km, mešovitih kategorija; ostatak mreže nepromenjen', () => {
+    const now = new Date(TIMES[3]);
+    const core = buildDemoCore(now, 'beograd');
+    expect(core.stations).toHaveLength(33);
+    const beograd = core.stations.filter((s) => /^Demo stanica Beograd \d$/.test(s.name));
+    expect(beograd).toHaveLength(9);
+    const points = beograd.map((s) => ({ lat: s.latitude as number, lon: s.longitude as number }));
+    for (const point of points) {
+      expect(point.lat).toBeGreaterThan(44.7);
+      expect(point.lat).toBeLessThan(44.9);
+    }
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) expect(distanceKm(points[i], points[j])).toBeLessThanOrEqual(12);
+    }
+    const ranks = new Set(core.snapshots.filter((s) => beograd.some((b) => b.id === s.station_id)).map((s) => s.category));
+    expect(ranks.size).toBeGreaterThanOrEqual(2);
+    // Ostale stanice su iste kao u podrazumevanom demou.
+    const others = (c: DemoCore) => c.stations.filter((s) => !/Beograd/.test(s.name)).map((s) => s.name);
+    expect(others(core)).toEqual(others(buildDemoCore(now)));
+    expect(buildDemoSyncRuns(now, core.stations.length)[0].stationsSeen).toBe(33);
+  });
+});

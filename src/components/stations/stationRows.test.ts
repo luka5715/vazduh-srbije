@@ -9,6 +9,8 @@ import {
   bandLimits,
   bandsFor,
   buildStationRows,
+  CARD_LIMIT,
+  cardSlice,
   DEFAULT_SORT,
   deltaText,
   encodeGroup,
@@ -298,5 +300,21 @@ describe('parametri URL-a (grupa, redosled)', () => {
     expect(parseSort('name-up')).toEqual(DEFAULT_SORT);
     expect(parseSort('-asc')).toEqual(DEFAULT_SORT);
     expect(parseSort('name')).toEqual(DEFAULT_SORT);
+  });
+});
+
+describe('cardSlice (kartice na telefonu)', () => {
+  const rows = Array.from({ length: 87 }, (_, i) => i);
+
+  it('bez filtera: prvih 20 i „+67“; prošireno: sve, uz „Prikaži manje“', () => {
+    expect(cardSlice(rows, { capped: true, expanded: false })).toEqual({ shown: rows.slice(0, CARD_LIMIT), hidden: 67, collapsible: false });
+    expect(cardSlice(rows, { capped: true, expanded: true })).toEqual({ shown: rows, hidden: 0, collapsible: true });
+  });
+
+  it('sa filterom ili pretragom nema ograničenja; kratka lista je cela i bez dugmeta', () => {
+    expect(cardSlice(rows, { capped: false, expanded: false })).toEqual({ shown: rows, hidden: 0, collapsible: false });
+    const short = rows.slice(0, CARD_LIMIT);
+    expect(cardSlice(short, { capped: true, expanded: false })).toEqual({ shown: short, hidden: 0, collapsible: false });
+    expect(cardSlice(short, { capped: true, expanded: true })).toEqual({ shown: short, hidden: 0, collapsible: false });
   });
 });

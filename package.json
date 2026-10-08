@@ -19,7 +19,8 @@
     "functions:build": "npm --prefix rayfin/functions run build",
     "dev:demo": "VITE_SERVICE_MODE=demo vite --port 5174",
     "build:demo": "VITE_SERVICE_MODE=demo vite build --outDir dist-demo",
-    "screenshots": "node scripts/screenshots.mjs"
+    "screenshots": "node scripts/screenshots.mjs",
+    "e2e": "node scripts/e2e.mjs dist-demo dist-demo/e2e"
   },
   "dependencies": {
     "@microsoft/rayfin-auth": "^1.36.2",

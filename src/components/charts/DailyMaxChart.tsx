@@ -196,7 +196,7 @@ export function DailyMaxChart({ stats, parameter, days }: DailyMaxChartProps) {
                 {t > 0 && !visibleThresholds.some((th) => Math.abs(th.y - y(t)) < 4) ? (
                   <line x1={x0} x2={x1} y1={y(t) + 0.5} y2={y(t) + 0.5} className="stroke-grid" strokeWidth={1} />
                 ) : null}
-                <text x={x0 - 8} y={y(t) + 3.5} textAnchor="end" className="tnum fill-muted font-mono text-[10px]">
+                <text x={x0 - 8} y={y(t) + 3.5} textAnchor="end" className="tick-label fill-muted">
                   {formatNumber(t, 0)}
                 </text>
               </g>
@@ -234,7 +234,7 @@ export function DailyMaxChart({ stats, parameter, days }: DailyMaxChartProps) {
                 <line x1={x0} x2={x1} y1={ty + 0.5} y2={ty + 0.5} className="stroke-panel-solid" strokeWidth={3} />
                 <line x1={x0} x2={x1} y1={ty + 0.5} y2={ty + 0.5} className="stroke-muted" strokeWidth={1} strokeDasharray="3 3" />
                 {labelled.has(rank) ? (
-                  <text x={x1 + 8} y={ty + 3.5} className="tnum fill-muted font-mono text-[10px]">
+                  <text x={x1 + 8} y={ty + 3.5} className="tick-label fill-muted">
                     {formatNumber(value, 0)}
                     {/* Iznad linije počinje sledeća kategorija (vrednost ≤ prag je još u nižoj). */}
                     {wide ? <tspan className="fill-muted font-body text-[11px]">{` ↑ ${CATEGORIES[rank + 1].label}`}</tspan> : ' ↑'}
@@ -252,7 +252,7 @@ export function DailyMaxChart({ stats, parameter, days }: DailyMaxChartProps) {
                   x={xCenter(i)}
                   y={HEIGHT - 7}
                   textAnchor="middle"
-                  className="tnum fill-muted font-mono text-[10px]"
+                  className="tick-label fill-muted"
                 >
                   {formatDayShort(day)}
                 </text>

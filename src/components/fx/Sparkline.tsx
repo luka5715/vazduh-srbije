@@ -235,17 +235,18 @@ export function Sparkline({
           )}
           {activeX !== null ? <line x1={activeX} x2={activeX} y1={0} y2={totalHeight} stroke="var(--muted)" strokeOpacity={0.6} strokeWidth={1} /> : null}
           {annotate && geometry.peak.index !== geometry.low.index ? (
-            <g fontFamily="var(--font-mono)" fontSize={10} fill="var(--muted)">
+            <g fill="var(--muted)">
               {showPeakDot ? (
                 <circle cx={geometry.peak.x} cy={geometry.peak.y} r={3.5} fill={mark} stroke="var(--panel-solid)" strokeWidth={2} />
               ) : null}
-              <text x={geometry.peak.x} y={geometry.peak.y - 7} textAnchor={anchorFor(geometry.peak.x)} className="tnum">
+              {/* Natpisi vrha i dna: `tick-label` (11 px na telefonu, 10 px od `sm`). */}
+              <text x={geometry.peak.x} y={geometry.peak.y - 7} textAnchor={anchorFor(geometry.peak.x)} className="tick-label">
                 maks. {format(geometry.peak.value)}
               </text>
               {showLowDot ? (
                 <circle cx={geometry.low.x} cy={geometry.low.y} r={3.5} fill="var(--panel-solid)" stroke={mark} strokeWidth={2} />
               ) : null}
-              <text x={geometry.low.x} y={geometry.low.y + 15} textAnchor={anchorFor(geometry.low.x)} className="tnum">
+              <text x={geometry.low.x} y={geometry.low.y + 15} textAnchor={anchorFor(geometry.low.x)} className="tick-label">
                 min. {format(geometry.low.value)}
               </text>
             </g>

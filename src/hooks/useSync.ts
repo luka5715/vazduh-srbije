@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { SyncResult } from '@shared/contracts';
-import { isAlreadyRunningError, summarizeSyncWarnings } from '@shared/syncNotes';
+import type { DailyStatRecord, SyncResult } from '@shared/contracts';
+import { isAlreadyRunningError, summarizeSyncWarnings, unwrittenRowsWarning } from '@shared/syncNotes';
 import { todayLocal } from '@shared/time';
 
 import { describeDataError, describeSyncError, errorMessage } from '@/lib/errors';
@@ -9,7 +9,13 @@ import { formatInt, pluralSr, stationsNoun } from '@/lib/format';
 import { historyCoverage, historyWindowStart, HISTORY_DAYS } from '@/lib/syncRules';
 import type { DataService } from '@/services/dataService';
 
-export const SYNC_HOURS_BACK = 36;
+/**
+ * Prozor sinhronizacije koji frontend traži od `syncAirQuality` (sati unazad; funkcija početak
+ * vraća na lokalnu ponoć). 72 h da se rupa preko vikenda (petak 18:00 → ponedeljak 08:00 = 62 h)
+ * sama zatvori i petak ostane potpun dan. Isti broj je `DEFAULT_HOURS_BACK` u
+ * rayfin/functions/src/sync.ts – menjaju se zajedno.
+ */
+export const SYNC_HOURS_BACK = 72;
 /** Koliko prošlih dana „Dopuni nedostajuće dane“ proverava (= koliko izvor čuva). */
 export const BACKFILL_DAYS = HISTORY_DAYS;
 
@@ -66,7 +72,11 @@ export interface SyncControls {
   notify: (outcome: Omit<SyncOutcome, 'at'>) => void;
 }
 
-/** Ishod uspešne sinhronizacije: „Podaci su osveženi“ ili „Osveženo delimično: X od Y stanica“. */
+/**
+ * Ishod uspešne sinhronizacije: „Podaci su osveženi“, „Osveženo delimično: X od Y stanica“ (deo
+ * stanica bez merenja) ili „Osveženo delimično: N redova nije upisano u bazu“ (prolazna greška baze
+ * koju ni ponovni pokušaj nije prošao – ti redovi zadržavaju ranije vrednosti).
+ */
 export function syncSuccessOutcome(result: SyncResult): Omit<SyncOutcome, 'at'> {
   const summary = summarizeSyncWarnings(result.warnings);
   const seen = result.stationsSeen;
@@ -82,12 +92,25 @@ export function syncSuccessOutcome(result: SyncResult): Omit<SyncOutcome, 'at'> 
     if (summary.skippedStations) {
       reasons.push(`${formatInt(summary.skippedStations)} ${pluralSr(summary.skippedStations, 'preskočena', 'preskočene', 'preskočeno')} zbog vremenskog limita`);
     }
+    // Isti oblik kao upozorenje funkcije (`unwrittenRowsWarning` u syncNotes) – jedno mesto za padeže.
+    const unwritten = summary.unwrittenRows
+      ? `${unwrittenRowsWarning(summary.unwrittenRows)} (prolazna greška baze); ti redovi zadržavaju ranije vrednosti do sledeće sinhronizacije.`
+      : '';
+    if (missing === 0) {
+      return {
+        kind: 'sync',
+        ok: true,
+        tone: 'partial',
+        title: `Osveženo delimično: ${unwrittenRowsWarning(summary.unwrittenRows)}`,
+        detail: `${unwritten} ${stationsNoun(seen) === 'stanica' ? `${formatInt(seen)} stanica` : `${formatInt(seen)} ${stationsNoun(seen)}`}, ${observations}, ${snapshots}.`,
+      };
+    }
     return {
       kind: 'sync',
       ok: true,
       tone: 'partial',
       title: `Osveženo delimično: ${formatInt(okStations)} od ${formatInt(seen)} ${stationsNoun(seen)}`,
-      detail: `${reasons.join(', ')}; te stanice zadržavaju ranije podatke. ${observations}, ${snapshots}.`,
+      detail: `${reasons.join(', ')}; te stanice zadržavaju ranije podatke.${unwritten ? ` ${unwritten}` : ''} ${observations}, ${snapshots}.`,
     };
   }
   const stations = `${formatInt(seen)} ${stationsNoun(seen)}`;
@@ -106,8 +129,15 @@ export type SyncCompleteHandler = (outcome: Omit<SyncOutcome, 'at'>) => void | P
  * Pokretanje Fabric funkcija iz UI: jedna sinhronizacija ili petlja dopunjavanja
  * istorije dan po dan (sa napretkom i zaustavljanjem). Po završetku zove `onComplete`
  * da se podaci ponovo učitaju; posao se na ekranu završava tek kad stignu novi podaci.
+ * `loadNetworkDaily` (podrazumevano `service.listNetworkDailyStats`) čita dnevnu statistiku
+ * mreže za planiranje dopune – provajder prosleđuje deljeni keš (`loadNetworkDaily` u
+ * useAtmosfera), pa planiranje ne čita bazu ponovo ako je Sinhronizacija to već uradila.
  */
-export function useSync(service: DataService, onComplete: SyncCompleteHandler): SyncControls {
+export function useSync(
+  service: DataService,
+  onComplete: SyncCompleteHandler,
+  loadNetworkDaily: (fromDay: string) => Promise<DailyStatRecord[]> = (fromDay) => service.listNetworkDailyStats(fromDay),
+): SyncControls {
   const [activity, setActivity] = useState<SyncActivity | null>(null);
   const [outcome, setOutcome] = useState<SyncOutcome | null>(null);
   const busyRef = useRef(false);
@@ -181,7 +211,8 @@ export function useSync(service: DataService, onComplete: SyncCompleteHandler): 
       if (!days) {
         try {
           const today = todayLocal();
-          const stats = await service.listNetworkDailyStats(historyWindowStart(today));
+          const stats = await loadNetworkDaily(historyWindowStart(today));
+          // Istekao rubni dan (`expired`) nije u `incomplete`: izvor ga već briše, ne može se dopuniti.
           days = historyCoverage(stats, today).incomplete;
         } catch (error) {
           const { title, hint } = describeDataError(error);
@@ -255,7 +286,7 @@ export function useSync(service: DataService, onComplete: SyncCompleteHandler): 
         });
       }
     },
-    [finish, service],
+    [finish, service, loadNetworkDaily],
   );
 
   const stopBackfill = useCallback(() => {

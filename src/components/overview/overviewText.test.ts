@@ -11,6 +11,7 @@ import {
   lensSentence,
   nextThreshold,
   rhythmSummary,
+  rovingIndex,
   sharedWordPrefix,
   staleNote,
   stationsGenitive,
@@ -22,6 +23,31 @@ describe('heroHeadline', () => {
     expect(heroHeadline([0, 0, 25, 0, 0, 0], 2)).toEqual({ lead: 'Vazduh je svuda', word: 'umeren', rank: 2 });
     expect(heroHeadline([3, 4, 4, 2, 0, 0], 2)?.lead).toBe('Vazduh je najčešće');
     expect(heroHeadline([0, 0, 0, 0, 3, 0], 4)?.word).toBe('veoma zagađen');
+  });
+
+  it('dva stanja kad je bar 40 % stanica u LOŠIJIM kategorijama od najčešće (živa raspodela 3/1/41/27/15/0)', () => {
+    // 41 od 87 stanica je „umeren“ (najčešće), ali 42 od 87 su „zagađen“ ili gore: „najčešće
+    // umeren“ bi umanjio stanje. Reč naslova je najbrojnija lošija kategorija i nosi njen rang
+    // (boja podvlačenja, rečenica „zbog …“ opisuje tu kategoriju).
+    expect(heroHeadline([3, 1, 41, 27, 15, 0], 2)).toEqual({ lead: 'Vazduh je umeren do', word: 'zagađen', rank: 3 });
+    // Dva stanja imaju prednost i nad „uglavnom“: 50 umeren + 40 zagađen (44 % lošijih).
+    expect(heroHeadline([0, 0, 50, 40, 0, 0], 2)).toEqual({ lead: 'Vazduh je umeren do', word: 'zagađen', rank: 3 });
+    // Među lošijim kategorijama najbrojnija; pri jednakom broju lošija (kao i izmaglica).
+    expect(heroHeadline([0, 0, 20, 10, 10, 0], 2)).toEqual({ lead: 'Vazduh je umeren do', word: 'veoma zagađen', rank: 4 });
+    // Tačno na pragu (40 %): mali okrug sa 5 stanica, 3 umeren + 2 zagađen.
+    expect(heroHeadline([0, 0, 3, 2, 0, 0], 2)).toEqual({ lead: 'Vazduh je umeren do', word: 'zagađen', rank: 3 });
+    expect(heroHeadline([2, 0, 3, 0, 0, 0], 2)).toEqual({ lead: 'Vazduh je uglavnom', word: 'umeren', rank: 2 });
+  });
+
+  it('jasan jednomodalan dan ostaje jedno stanje', () => {
+    // 12 od 87 lošijih (14 %) → „uglavnom“; 3 od 10 (30 %) → takođe jedno stanje.
+    expect(heroHeadline([5, 10, 60, 12, 0, 0], 2)).toEqual({ lead: 'Vazduh je uglavnom', word: 'umeren', rank: 2 });
+    expect(heroHeadline([0, 0, 7, 3, 0, 0], 2)).toEqual({ lead: 'Vazduh je uglavnom', word: 'umeren', rank: 2 });
+    expect(heroHeadline([0, 0, 25, 0, 0, 0], 2)).toEqual({ lead: 'Vazduh je svuda', word: 'umeren', rank: 2 });
+    // Najgora kategorija nema lošijih: nikad „izuzetno zagađen do …“.
+    expect(heroHeadline([0, 0, 0, 0, 3, 4], 5)).toEqual({ lead: 'Vazduh je uglavnom', word: 'izuzetno zagađen', rank: 5 });
+    // Ogledalo (najčešća je loša, mnoge su bolje): „najčešće zagađen“ ne umanjuje stanje – ostaje.
+    expect(heroHeadline([30, 5, 10, 40, 2, 0], 3)).toEqual({ lead: 'Vazduh je najčešće', word: 'zagađen', rank: 3 });
   });
 
   it('bez svežih stanica nema naslova', () => {
@@ -192,6 +218,20 @@ describe('deltaPhrase', () => {
     // Iznos kao na Stanicama: jedna decimala ispod 10.
     expect(deltaPhrase(-4.36, 'down').amount).toBe('4,4');
     expect(deltaPhrase(0.2, 'flat').amount).toBeNull();
+  });
+});
+
+describe('rovingIndex', () => {
+  it('strelice bez prelaska preko ivice, Home/End do krajeva, ostali tasteri ne pomeraju fokus', () => {
+    expect(rovingIndex('ArrowRight', 0, 12)).toBe(1);
+    expect(rovingIndex('ArrowRight', 11, 12)).toBe(11);
+    expect(rovingIndex('ArrowLeft', 5, 12)).toBe(4);
+    expect(rovingIndex('ArrowLeft', 0, 12)).toBe(0);
+    expect(rovingIndex('Home', 7, 12)).toBe(0);
+    expect(rovingIndex('End', 2, 12)).toBe(11);
+    expect(rovingIndex('Tab', 2, 12)).toBeNull();
+    expect(rovingIndex('Enter', 2, 12)).toBeNull();
+    expect(rovingIndex('ArrowRight', 0, 0)).toBeNull();
   });
 });
 

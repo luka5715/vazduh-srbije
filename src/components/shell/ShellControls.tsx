@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { useAuth } from '@/hooks/AuthContext';
 import { useAtmosfera } from '@/hooks/useAtmosfera';
 import { cn } from '@/lib/cn';
-import { formatDateTime, formatRelative } from '@/lib/format';
+import { formatDateTime, formatDayLong, formatRelative } from '@/lib/format';
 
 const ICON_BUTTON =
   'grid size-10 shrink-0 place-items-center rounded-ctl text-ink transition-colors hover:bg-card-2 focus-visible:outline-offset-0';
@@ -115,23 +115,24 @@ export function UserMenu({ placement = 'below', showName = false, className }: {
 /**
  * „Osveženo pre 12 min“ – iz poslednje uspešne sinhronizacije trenutnog stanja. Nije
  * `aria-live` (menja se svakog minuta); početak i kraj posla najavljuje ljuska (AppShell).
+ * Tekst u toku posla se ne završava trotačkom: u skraćenom polju bi izgledao kao odsečen.
  */
 export function SyncStatusText({ className }: { className?: string }) {
   const { lastSync, now, sync } = useAtmosfera();
-  const text = sync.activity
+  const { text, title } = sync.activity
     ? sync.activity.kind === 'sync'
-      ? 'Osvežavanje u toku…'
+      ? { text: 'Osvežavanje u toku', title: 'Preuzimanje podataka sa SEPA je u toku' }
       : sync.activity.planning
-        ? 'Istorija: provera…'
-        : `Istorija: dan ${sync.activity.index} od ${sync.activity.total}`
+        ? { text: 'Istorija: provera dana', title: 'Istorija: provera dana koji nedostaju' }
+        : {
+            text: `Istorija: dan ${sync.activity.index} od ${sync.activity.total}`,
+            title: `Istorija: dan ${sync.activity.index} od ${sync.activity.total} · ${formatDayLong(sync.activity.day)}`,
+          }
     : lastSync
-      ? `Osveženo ${formatRelative(lastSync, now)}`
-      : 'Još nije osveženo';
+      ? { text: `Osveženo ${formatRelative(lastSync, now)}`, title: `Poslednja uspešna sinhronizacija: ${formatDateTime(lastSync)}` }
+      : { text: 'Još nije osveženo', title: undefined };
   return (
-    <p
-      className={cn('flex min-w-0 items-center gap-1.5 text-xs text-muted', !lastSync && !sync.activity && 'text-faint', className)}
-      title={lastSync ? `Poslednja uspešna sinhronizacija: ${formatDateTime(lastSync)}` : undefined}
-    >
+    <p className={cn('flex min-w-0 items-center gap-1.5 text-xs text-muted', !lastSync && !sync.activity && 'text-faint', className)} title={title}>
       <Clock aria-hidden className="size-3.5 shrink-0" />
       <span className="tnum truncate">{text}</span>
     </p>

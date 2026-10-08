@@ -21,7 +21,7 @@ import { ViewToggle, type View } from '@/components/ui/ViewToggle';
 import { useAsyncData } from '@/hooks/useAsyncData';
 import { catVar, categoryOf } from '@/lib/category';
 import { cn } from '@/lib/cn';
-import { formatConcentration, formatDayShort, formatDelta, formatHourAt, formatInt, formatRelative } from '@/lib/format';
+import { formatConcentration, formatDayShort, formatDelta, formatHourAt, formatInt } from '@/lib/format';
 import { deltaVs24h, okrugLabel, okrugOf, type Lens } from '@/lib/insights';
 import { isInactive, liveStatus, STALE_HOURS, type StationView } from '@/lib/stations';
 import type { DataService } from '@/services/dataService';
@@ -119,7 +119,7 @@ export function StationDetail({ view, service, dataVersion, now, lens = 'worst',
           title={view.stale ? 'Poslednja 24 sata sa podacima' : 'Poslednja 24 sata'}
           hint={
             view.stale
-              ? `Do poslednjeg merenja (${formatHourAt(view.observedAt, now)}, ${formatRelative(view.observedAt ?? now, now)}) – zastarele vrednosti.`
+              ? `Do poslednjeg merenja (${formatHourAt(view.observedAt, now)}, ${liveStatus(view.observedAt, now).ageText}) – zastarele vrednosti.`
               : 'Svaki polutant na svojoj skali; pozadina su SEPA kategorije, tačka na kraju je trenutna.'
           }
           actions={<ViewToggle value={hourlyView} onChange={setHourlyView} label="Prikaz satnih vrednosti" />}
@@ -152,7 +152,7 @@ export function StationDetail({ view, service, dataVersion, now, lens = 'worst',
               <Shimmer className="h-[230px]" rounded="tile" />
             </div>
           ) : dailyFailed ? (
-            <ErrorBanner title="Dnevna statistika nije učitana" message={daily.error ?? 'Nepoznata greška'} onRetry={daily.reload} />
+            <ErrorBanner title="Dnevna statistika nije učitana" message={daily.error ?? 'Nepoznata greška'} detail={daily.errorDetail} onRetry={daily.reload} />
           ) : dailyData && dailyData.length > 0 ? (
             dailyView === 'chart' ? (
               <DailyMaxChart stats={dailyData} parameter={activeParameter} days={days} />
@@ -281,7 +281,8 @@ function StationHeader({
       {view.stale && view.observedAt ? (
         <div className="rounded-ctl border border-warn/30 bg-warn-soft px-3 py-2 text-[13px] leading-5 text-warn-soft-ink">
           <p className="tnum font-medium">
-            Poslednji podaci: {formatHourAt(view.observedAt, now)} · {formatRelative(view.observedAt, now)}
+            {/* Starost od KRAJA intervala (`liveStatus().ageText`) – ista kao u čipu ljuske za isti sat. */}
+            Poslednji podaci: {formatHourAt(view.observedAt, now)} · {liveStatus(view.observedAt, now).ageText}
           </p>
           <p className="mt-0.5">
             {view.station.active === false

@@ -6,9 +6,15 @@
  * Istorija ima rupe kao prava baza (`demoHistoryGaps`); `runBackfill` ih popunjava. Scenariji
  * (`?demo=` u adresi, vidi `demoScenario`):
  *  - `empty` – prazna baza; posle prve sinhronizacije se puni kao prava: stanice, snimci i dnevna
- *    statistika samo za juče i danas (prozor sinhronizacije), ostalo čeka „Dopuni nedostajuće dane“;
+ *    statistika samo za dane koje prozor sinhronizacije (`SYNC_HOURS_BACK` h) dodiruje, ostalo
+ *    čeka „Dopuni nedostajuće dane“;
  *  - `late`  – SEPA kasni: sinhronizacija je uspela pre 12 min, ali najnoviji sat u bazi je
- *    `LATE_FEED_HOURS` sati stariji nego obično (stanice su i dalje sveže, ali ništa nije „uživo“).
+ *    `LATE_FEED_HOURS` sati stariji nego obično (stanice su i dalje sveže, ali ništa nije „uživo“);
+ *  - `smog`  – izmišljena epizoda smoga (medijana PM10 ≈ 300 µg/m³, većina stanica „Veoma
+ *    zagađen“/„Opasan“) – oblik podataka bira fixture (`buildDemoCore(now, 'smog')`);
+ *  - `beograd` – devet stanica u beogradskom klasteru umesto dve (33 stanice ukupno).
+ * Servis postoji samo u demo režimu (`createDataService` → `isDemoMode()`), pa scenariji u `rayfin`
+ * režimu nisu dostupni.
  */
 
 import type {
@@ -30,6 +36,7 @@ import {
   type DemoCore,
   type DemoHistoryGaps,
 } from '@/demo/fixture';
+import { SYNC_HOURS_BACK } from '@/hooks/useSync';
 import { isRunInvalid } from '@/lib/syncRules';
 
 import type { DataService } from './dataService';
@@ -67,7 +74,7 @@ export class DemoDataService implements DataService {
   private runCounter = 0;
 
   private get data(): DemoCore {
-    if (!this.core) this.core = this.empty ? { specs: [], stations: [], snapshots: [] } : buildDemoCore(this.feedNow);
+    if (!this.core) this.core = this.empty ? { specs: [], stations: [], snapshots: [] } : buildDemoCore(this.feedNow, this.scenario);
     return this.core;
   }
 
@@ -77,7 +84,7 @@ export class DemoDataService implements DataService {
   }
 
   private get runs(): SyncRunRecord[] {
-    if (!this.syncRuns) this.syncRuns = this.empty ? [] : buildDemoSyncRuns(this.now);
+    if (!this.syncRuns) this.syncRuns = this.empty ? [] : buildDemoSyncRuns(this.now, this.data.stations.length);
     return this.syncRuns;
   }
 
@@ -92,7 +99,7 @@ export class DemoDataService implements DataService {
       this.daily = (async () => {
         const all: DailyStatRecord[] = [];
         for (const spec of this.data.specs) {
-          all.push(...dailyStatsForStation(spec, this.feedNow));
+          all.push(...dailyStatsForStation(spec, this.feedNow, this.scenario));
           await delay(0); // pusti event loop da UI ostane odzivan
         }
         return all;
@@ -143,13 +150,16 @@ export class DemoDataService implements DataService {
     const finished = new Date();
     if (this.empty) {
       // Prva sinhronizacija prazne baze: stanice i snimci, a dnevna statistika samo za dane
-      // koje prozor od 36 h dodiruje (juče i danas) – kao `runSync` na serveru.
+      // koje prozor od `SYNC_HOURS_BACK` h dodiruje (početak prozora se vraća na lokalnu ponoć
+      // svog dana, pa su to 4 dana za 72 h) – kao `runSync` na serveru.
       this.empty = false;
       this.core = null;
       this.gapsCache = null;
       this.daily = null;
       const today = localDay(this.now);
-      this.firstRunDays = new Set([addDays(today, -1), today]);
+      const days = new Set<string>();
+      for (let day = localDay(new Date(this.now.getTime() - SYNC_HOURS_BACK * 3_600_000)); day <= today; day = addDays(day, 1)) days.add(day);
+      this.firstRunDays = days;
     }
     const id = `demo-run-sync-${++this.runCounter}`;
     const stations = this.data.stations.length;

@@ -27,7 +27,7 @@ function row(day: string, station = 's1'): Row {
  * baca grešku „input object field gte does not exist“; strane idu po `day desc` i `first(n)`.
  */
 function fakeClient(rows: Row[], pageSize: number) {
-  const requests: Array<{ where: unknown; after?: string }> = [];
+  const requests: Array<{ where: unknown; after?: string; first?: number }> = [];
   const builder = (state: { where?: Record<string, { eq?: string; gte?: string }>; order?: Record<string, string>; first?: number; after?: string }) => ({
     select: () => builder(state),
     where: (where: Record<string, { eq?: string; gte?: string }>) => builder({ ...state, where }),
@@ -35,7 +35,7 @@ function fakeClient(rows: Row[], pageSize: number) {
     first: (first: number) => builder({ ...state, first }),
     after: (after: string) => builder({ ...state, after }),
     async executePaginated() {
-      requests.push({ where: state.where, after: state.after });
+      requests.push({ where: state.where, after: state.after, first: state.first });
       for (const condition of Object.values(state.where ?? {})) {
         if (condition.gte !== undefined) throw new Error("GraphQL errors: The specified input object field `gte` does not exist.");
       }
@@ -77,6 +77,24 @@ describe('RayfinDataService daily statistics (no range filter on text columns)',
     expect(result.map((r) => `${r.station_id}:${r.day}`)).toEqual(['s2:2026-09-05', 's2:2026-09-06']);
     expect(requests).toHaveLength(1);
     expect(requests[0].where).toEqual({ station_id: { eq: 's2' } });
+  });
+
+  it('reads the whole network in 5000-row pages (3 round trips for 30 days of 87 stations) and one station in 1000-row pages', async () => {
+    // 30 days × 87 stations × 5 pollutants = 13 050 rows, newest first; fromDay keeps all of them.
+    const days = Array.from({ length: 30 }, (_, i) => `2026-09-${String(i + 1).padStart(2, '0')}`);
+    const rows = days.flatMap((day) => Array.from({ length: 87 * 5 }, (_, i) => row(day, `s${Math.floor(i / 5)}-${i % 5}`)));
+    const network = fakeClient(rows, 5000);
+    const service = new RayfinDataService(network.client);
+
+    const result = await service.listNetworkDailyStats('2026-09-01');
+    expect(result).toHaveLength(13_050);
+    expect(network.requests).toHaveLength(3);
+    expect(network.requests.every((r) => r.first === 5000)).toBe(true);
+
+    const station = fakeClient(rows, 5000);
+    await new RayfinDataService(station.client).listDailyStats('s0-0', '2026-09-01');
+    expect(station.requests).toHaveLength(1);
+    expect(station.requests[0].first).toBe(1000);
   });
 
   it('returns an empty list when every row is older than fromDay', async () => {

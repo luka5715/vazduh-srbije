@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { columnLabelOffsets, HEAT_GAP, LABEL_CHAR_PX } from './heatGridLabels';
+import { columnLabelOffsets, HEAT_GAP, LABEL_CHAR_PX, LABEL_CHAR_PX_PHONE } from './heatGridLabels';
 
 /** Leva i desna ivica prikazanih oznaka u px od početka oblasti ćelija. */
-function extents(labels: string[], cell: number, every: number) {
-  const offsets = columnLabelOffsets(labels.map((label) => ({ label })), cell, every);
+function extents(labels: string[], cell: number, every: number, charPx = LABEL_CHAR_PX) {
+  const offsets = columnLabelOffsets(labels.map((label) => ({ label })), cell, every, charPx);
   return offsets.flatMap((offset, c) =>
-    offset === null ? [] : [{ c, start: c * (cell + HEAT_GAP) + offset, end: c * (cell + HEAT_GAP) + offset + labels[c].length * LABEL_CHAR_PX }],
+    offset === null ? [] : [{ c, start: c * (cell + HEAT_GAP) + offset, end: c * (cell + HEAT_GAP) + offset + labels[c].length * charPx }],
   );
 }
 
@@ -32,6 +32,20 @@ describe('columnLabelOffsets', () => {
       const every = Math.max(1, Math.ceil((7 * LABEL_CHAR_PX + 8) / (cell + HEAT_GAP)));
       const shown = extents(labels, cell, every);
       expect(shown.length).toBeGreaterThan(0);
+      for (let i = 1; i < shown.length; i++) expect(shown[i].start).toBeGreaterThanOrEqual(shown[i - 1].end + 6 - 0.01);
+      expect(shown[0].start).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('na telefonu (11 px, širi znak) oznake su ređe, ali se i dalje ne preklapaju i ne izlaze iz oblasti', () => {
+    const labels = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+    expect(LABEL_CHAR_PX_PHONE).toBeGreaterThan(LABEL_CHAR_PX);
+    for (const cell of [8, 10, 12]) {
+      const everyPhone = Math.max(1, Math.ceil((2 * LABEL_CHAR_PX_PHONE + 8) / (cell + HEAT_GAP)));
+      const shown = extents(labels, cell, everyPhone, LABEL_CHAR_PX_PHONE);
+      const span = 24 * (cell + HEAT_GAP) - HEAT_GAP;
+      expect(shown.at(-1)?.c).toBe(23);
+      expect(shown.at(-1)!.end).toBeLessThanOrEqual(span + 0.01);
       for (let i = 1; i < shown.length; i++) expect(shown[i].start).toBeGreaterThanOrEqual(shown[i - 1].end + 6 - 0.01);
       expect(shown[0].start).toBeGreaterThanOrEqual(0);
     }

@@ -26,8 +26,18 @@ export interface Headline {
 }
 
 /**
+ * Udeo svežih stanica u kategorijama LOŠIJIM od dominantne od kojeg naslov nosi dva stanja
+ * („umeren do zagađen“): „najčešće umeren“ uz 42 od 87 stanica u „Zagađen“ ili gore umanjuje stanje.
+ */
+export const TWO_STATE_SHARE = 0.4;
+
+/**
  * Naslov heroja iz broja stanica po kategoriji i dominantne kategorije (najčešća, pri
- * jednakom broju lošija – isto kao `--haze`). Prilog prati udeo dominantne kategorije:
+ * jednakom broju lošija – isto kao `--haze`). Kad je bar `TWO_STATE_SHARE` stanica u lošijim
+ * kategorijama od dominantne, naslov ima dva stanja: „Vazduh je umeren do“ + „zagađen“
+ * (najbrojnija lošija kategorija, pri jednakom broju lošija); `rank` je ta lošija kategorija,
+ * pa boja reči i rečenica „zbog …“ opisuju nju. Obrnuto (dominantna loša, mnoge bolje) ostaje
+ * jedno stanje – „najčešće zagađen“ ne umanjuje stanje. Inače prilog prati udeo dominantne:
  * sve stanice → „svuda“, bar polovina → „uglavnom“, manje → „najčešće“. Sa jednom ili dve
  * stanice (mali okrug) naslov broji stanice umesto priloga – „svuda“ za jednu stanicu laže:
  * „Na jedinoj stanici vazduh je …“, „Na obe stanice …“, „Na jednoj od dve stanice …“ (lošija).
@@ -41,9 +51,19 @@ export function heroHeadline(counts: readonly number[], dominant: CategoryRank |
     if (reporting === 1) return { lead: 'Na jedinoj stanici vazduh je', word, rank: worst };
     return { lead: counts[worst] === 2 ? 'Na obe stanice vazduh je' : 'Na jednoj od dve stanice vazduh je', word, rank: worst };
   }
+  const dominantWord = CATEGORIES[dominant].label.toLowerCase();
+  let worse = 0;
+  let worseMode: CategoryRank | null = null;
+  for (let rank = dominant + 1; rank < counts.length; rank++) {
+    worse += counts[rank];
+    if (counts[rank] > 0 && (worseMode === null || counts[rank] >= counts[worseMode])) worseMode = rank as CategoryRank;
+  }
+  if (worseMode !== null && worse / reporting >= TWO_STATE_SHARE) {
+    return { lead: `Vazduh je ${dominantWord} do`, word: CATEGORIES[worseMode].label.toLowerCase(), rank: worseMode };
+  }
   const share = counts[dominant] / reporting;
   const adverb = share >= 0.999 ? 'svuda' : share >= 0.5 ? 'uglavnom' : 'najčešće';
-  return { lead: `Vazduh je ${adverb}`, word: CATEGORIES[dominant].label.toLowerCase(), rank: dominant };
+  return { lead: `Vazduh je ${adverb}`, word: dominantWord, rank: dominant };
 }
 
 /** „na obe stanice“, „na sve 3 stanice“, „na svih 18 stanica“. */
@@ -130,6 +150,26 @@ export function distributionSentence(counts: readonly number[]): string {
   );
   if (rest > 0) parts.push(`na još ${formatInt(rest)} u ostalim kategorijama`);
   return `${parts.join(', ')}.`;
+}
+
+/**
+ * Red sa jednim mestom za Tab (traka uživo): sledeći indeks za ←/→ (bez prelaska preko ivice,
+ * kao na mapi), Home/End za prvu i poslednju stavku; null kad taster ne pomera fokus.
+ */
+export function rovingIndex(key: string, index: number, count: number): number | null {
+  if (count <= 0) return null;
+  switch (key) {
+    case 'ArrowRight':
+      return Math.min(count - 1, index + 1);
+    case 'ArrowLeft':
+      return Math.max(0, index - 1);
+    case 'Home':
+      return 0;
+    case 'End':
+      return count - 1;
+    default:
+      return null;
+  }
 }
 
 /** Napomena o zastarelim stanicama koje nisu uračunate u stanje mreže (ili null). */

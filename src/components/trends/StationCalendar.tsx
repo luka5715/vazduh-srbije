@@ -181,7 +181,7 @@ export function StationCalendar({ daily, className, style }: { daily: NetworkDai
         {state.status === 'loading' ? (
           <CalendarSkeleton />
         ) : state.status === 'error' ? (
-          <ErrorBanner title="Kalendar nije učitan" message={state.error ?? 'Nepoznata greška'} onRetry={state.reload} />
+          <ErrorBanner title="Kalendar nije učitan" message={state.error ?? 'Nepoznata greška'} detail={state.errorDetail} onRetry={state.reload} />
         ) : !matrix || (matrix.rows.length === 0 && (state.data?.length ?? 0) === 0) ? (
           <EmptyNote className="flex-wrap">
             Još nema dnevne statistike.{' '}

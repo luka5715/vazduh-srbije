@@ -7,7 +7,7 @@ import { GlassPanel } from '@/components/fx/GlassPanel';
 import { Shimmer } from '@/components/fx/Shimmer';
 import { RunLogToggle, type RunLogView } from '@/components/sync/RunLogToggle';
 import { RunStatusBadge } from '@/components/sync/RunStatus';
-import { runStatus, type RunStatus } from '@/components/sync/runModel';
+import { durationExpectation, runStatus, summarizeRuns, type RunStatus } from '@/components/sync/runModel';
 import { SyncActions } from '@/components/sync/SyncActions';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { ErrorBanner } from '@/components/ui/Feedback';
@@ -99,7 +99,8 @@ function LogBody({ runs, now, view }: { runs: SyncRunRecord[]; now: Date; view: 
 
 /**
  * Dnevnik sinhronizacija kao vertikalna vremenska linija (status ikonom i rečju, prozor
- * merenja, stanice/merenja/redovi, trajanje prema limitu od 240 s, poruka), sa tabelarnim
+ * merenja, stanice/merenja/redovi, trajanje u razmeri najdužeg prikazanog posla – najmanje 60 s,
+ * `durationScaleMs`; limit funkcije od 240 s je u naslovu trake –, poruka), sa tabelarnim
  * blizancem. Napušteni `running` redovi (vidi `isRunAbandoned`) imaju svoj status i objašnjenje.
  */
 export function SyncPanel({
@@ -127,7 +128,16 @@ export function SyncPanel({
   const lastN = `${pluralSr(runs.length, 'poslednji', 'poslednja', 'poslednjih')} ${formatInt(runs.length)} ${pluralSr(runs.length, 'posao', 'posla', 'poslova')}`;
 
   const actions = showActions ? (
-    <SyncActions activity={activity} outcome={outcome} onSync={onSync} onBackfill={onBackfill} onStop={onStop} mode={mode} size="md" />
+    <SyncActions
+      activity={activity}
+      outcome={outcome}
+      onSync={onSync}
+      onBackfill={onBackfill}
+      onStop={onStop}
+      mode={mode}
+      expectation={durationExpectation(summarizeRuns(runs, now))}
+      size="md"
+    />
   ) : null;
 
   if (!collapsible) {
@@ -139,7 +149,7 @@ export function SyncPanel({
             <h2 id={titleId} className="text-base font-semibold leading-6 text-ink">
               Sinhronizacije i istorija
             </h2>
-            <p className="mt-0.5 text-[13px] leading-5 text-muted">Najnoviji posao prvi. Trajanje se poredi sa limitom Fabric funkcije od 240 s.</p>
+            <p className="mt-0.5 text-[13px] leading-5 text-muted">Najnoviji posao prvi. Trake trajanja su u razmeri najdužeg prikazanog posla (najmanje 60 s); limit Fabric funkcije je 240 s.</p>
           </div>
           {runs.length ? <RunLogToggle value={view} onChange={setView} /> : null}
         </div>

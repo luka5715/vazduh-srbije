@@ -17,16 +17,19 @@ export interface NetworkDaily extends TrendWindow {
  * Dnevna statistika mreže za poslednjih 30 dana i dan pre njih (poređenje 15 + 15 završenih
  * dana, vidi `compareDays`) – učitava se JEDNOM za stranicu Trendovi (pločice, trend,
  * kalendar), ponovo posle svake sinhronizacije/istorije (`dataVersion`) i kad počne novi
- * dan. Pri ponovnom učitavanju stari podaci ostaju prikazani (prigušeno).
+ * dan. Čitanje ide kroz deljeni keš provajdera (`loadNetworkDaily`): isti prvi dan traži i
+ * pokrivenost istorije na Sinhronizaciji, pa prelazak sa jedne stranice na drugu ne čita bazu
+ * ponovo. Pri ponovnom učitavanju stari podaci ostaju prikazani (prigušeno).
  */
 export function useNetworkDaily(): NetworkDaily {
-  const { service, now, dataVersion } = useAtmosfera();
+  const { loadNetworkDaily, now } = useAtmosfera();
   const nowMs = now.getTime();
   const today = todayLocal(now);
   // Prozor zavisi samo od dana – `now` se menja svakog minuta.
   // eslint-disable-next-line react-hooks/exhaustive-deps -- namerno samo `today`
   const range = useMemo(() => trendWindow(new Date(nowMs)), [today]);
   const loadFrom = range.compareDays[0] ?? range.fromDay;
-  const state = useAsyncData(() => service.listNetworkDailyStats(loadFrom), [service, loadFrom, dataVersion]);
+  // `loadNetworkDaily` menja identitet sa `dataVersion`, pa je to i zavisnost učitavanja.
+  const state = useAsyncData(({ retry }) => loadNetworkDaily(loadFrom, { fresh: retry }), [loadNetworkDaily, loadFrom]);
   return { ...range, state };
 }

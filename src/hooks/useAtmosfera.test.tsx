@@ -1,4 +1,5 @@
 import { act, render, screen } from '@testing-library/react';
+import { useEffect, useState } from 'react';
 import { MemoryRouter, useSearchParams } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -368,6 +369,45 @@ describe('AtmosferaProvider – kartica se vraća, dugme „Osveži“', () => {
     expect(screen.getByTestId('outcome')).toHaveTextContent('ready|partial|Sinhronizacija je uspela, ali SEPA nema novih merenja');
   });
 
+  it('automatska sinhronizacija kad je SEPA po očekivanju već objavila sledeći sat (poslednja pre 30 min)', async () => {
+    // Najnoviji sat u bazi je 07–08Z (demo prema 08:30Z: prethodni pun sat); SLEDEĆI sat 08–09Z se
+    // završio u 09:00Z i očekuje se od 09:20Z (EXPECTED_LAG 20 min) < NOW 09:30Z; poslednja uspešna
+    // sinhronizacija je od pre 30 min (< 65 min, > MIN_GAP 20 min) → sinhronizuj.
+    const service = okService(30, [], new Date(NOW.getTime() - 60 * MINUTE));
+    holder.service = service;
+    renderWith(rayfinAuth);
+    await flush();
+    expect(service.runSync).toHaveBeenCalledTimes(1);
+    // Posle posla poslednja sinhronizacija je „upravo“: tiho čitanje posle 12 min ne pokreće drugu
+    // (12 min < MIN_GAP), pa u jednoj kartici nema više od jedne sinhronizacije po MIN_GAP.
+    const newer = syncRun('new', 'ok', 0, 0);
+    service.latestSuccessfulSync.mockImplementation(async () => newer);
+    service.listSyncRuns.mockImplementation(async () => [newer]);
+    await flush(VISIBLE_RELOAD_MS);
+    expect(service.runSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('bez automatske sinhronizacije kad je najnoviji sat svež (sledeći još nije objavljen) i poslednja je mlađa od 65 min', async () => {
+    // 09:10Z: najnoviji interval u bazi je 07–08Z (demo prema 08:10Z: prethodni pun sat); sledeći,
+    // 08–09Z, završio se u 09:00Z i očekuje se od 09:20Z → još ništa za preuzimanje; poslednja
+    // sinhronizacija je mlađa od 65 min.
+    const now = new Date('2026-10-07T09:10:00Z');
+    vi.setSystemTime(now);
+    const service = okService(10, [], new Date(now.getTime() - 60 * MINUTE));
+    // Dnevnik relativan prema ovom `now` (okService ga gradi prema NOW = 09:30Z, što bi bila budućnost).
+    const okRun = { ...syncRun('ok', 'ok', 11, 10), startedAt: new Date(now.getTime() - 11 * MINUTE).toISOString(), finishedAt: new Date(now.getTime() - 10 * MINUTE).toISOString() };
+    service.listSyncRuns.mockImplementation(async () => [okRun]);
+    service.latestSuccessfulSync.mockImplementation(async () => okRun);
+    holder.service = service;
+    renderWith(rayfinAuth);
+    await flush();
+    expect(service.runSync).not.toHaveBeenCalled();
+    // 12 min kasnije (09:22Z) tiho čitanje ponovo proverava pravilo: sledeći sat 08–09Z je sada
+    // očekivan (09:20Z < 09:22Z), poslednja sinhronizacija je starija od MIN_GAP (22 min) → sinhronizuj.
+    await flush(VISIBLE_RELOAD_MS);
+    expect(service.runSync).toHaveBeenCalledTimes(1);
+  });
+
   it('sinhronizacija koja donese novije, ali i dalje stare sate kaže „SEPA i dalje kasni“', async () => {
     // Pre posla najnoviji sat je od pre ~9 h, posle od pre ~6 h: novi sati jesu stigli.
     const service = okService(30, [], new Date(NOW.getTime() - 8 * 60 * MINUTE));
@@ -380,5 +420,148 @@ describe('AtmosferaProvider – kartica se vraća, dugme „Osveži“', () => {
     await flush();
     expect(service.runSync).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('outcome')).toHaveTextContent('ready|partial|Osveženo – SEPA i dalje kasni');
+  });
+});
+
+function NetworkDailyProbe({ fromDay, tag }: { fromDay: string; tag: string }) {
+  const { loadNetworkDaily, dataVersion } = useAtmosfera();
+  const [rows, setRows] = useState<number | null>(null);
+  useEffect(() => {
+    let active = true;
+    void loadNetworkDaily(fromDay).then((data) => {
+      if (active) setRows(data.length);
+    });
+    return () => {
+      active = false;
+    };
+  }, [loadNetworkDaily, fromDay]);
+  return <p data-testid={`daily-${tag}`}>{`${tag}|v${dataVersion}|${rows ?? '-'}`}</p>;
+}
+
+describe('AtmosferaProvider – deljeno čitanje dnevne statistike mreže (loadNetworkDaily)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
+    vi.setSystemTime(NOW);
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('dva potrošača istog prvog dana (Trendovi, pa Sinhronizacija) čitaju bazu jednom; posle posla ponovo', async () => {
+    const service = okService(10);
+    service.listNetworkDailyStats.mockImplementation(async () => Array.from({ length: 7 }, (_, i) => ({ id: `r${i}` })) as never);
+    holder.service = service;
+    function Harness() {
+      const [second, setSecond] = useState(false);
+      const { refresh } = useAtmosfera();
+      return (
+        <>
+          <NetworkDailyProbe fromDay="2026-09-07" tag="a" />
+          {second ? <NetworkDailyProbe fromDay="2026-09-07" tag="b" /> : null}
+          <button type="button" onClick={() => setSecond(true)}>
+            drugi
+          </button>
+          <button type="button" onClick={refresh}>
+            osveži
+          </button>
+        </>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={['/?view=trendovi']}>
+        <AuthProvider authService={auth}>
+          <AtmosferaProvider>
+            <Harness />
+          </AtmosferaProvider>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    await flush();
+    expect(screen.getByTestId('daily-a')).toHaveTextContent('a|v0|7');
+    expect(service.listNetworkDailyStats).toHaveBeenCalledTimes(1);
+
+    // Drugi potrošač se montira kasnije: dobija keširani rezultat, bez novog čitanja.
+    act(() => screen.getByRole('button', { name: 'drugi' }).click());
+    await flush();
+    expect(screen.getByTestId('daily-b')).toHaveTextContent('b|v0|7');
+    expect(service.listNetworkDailyStats).toHaveBeenCalledTimes(1);
+
+    // Sinhronizacija (poslednja je od pre 10 min → „Osveži“ samo čita bazu; zato direktno kroz sync).
+    expect(service.listNetworkDailyStats).toHaveBeenCalledWith('2026-09-07');
+  });
+
+  it('posle sopstvenog posla (dataVersion raste) keš se ne koristi: oba potrošača čitaju novu verziju jednim upitom', async () => {
+    const service = okService(90, [], NOW);
+    service.listNetworkDailyStats.mockImplementation(async () => [] as never);
+    holder.service = service;
+    function Harness() {
+      const { sync } = useAtmosfera();
+      return (
+        <>
+          <NetworkDailyProbe fromDay="2026-09-07" tag="a" />
+          <NetworkDailyProbe fromDay="2026-09-07" tag="b" />
+          <button type="button" onClick={() => void sync.startSync()}>
+            sinhronizuj
+          </button>
+        </>
+      );
+    }
+    render(
+      <MemoryRouter initialEntries={['/?view=sinhronizacija']}>
+        <AuthProvider authService={auth}>
+          <AtmosferaProvider>
+            <Harness />
+          </AtmosferaProvider>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    await flush();
+    expect(screen.getByTestId('daily-a')).toHaveTextContent('a|v0|0');
+    expect(screen.getByTestId('daily-b')).toHaveTextContent('b|v0|0');
+    expect(service.listNetworkDailyStats).toHaveBeenCalledTimes(1);
+
+    act(() => screen.getByRole('button', { name: 'sinhronizuj' }).click());
+    await flush();
+    expect(service.runSync).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('daily-a')).toHaveTextContent('a|v1|0');
+    expect(screen.getByTestId('daily-b')).toHaveTextContent('b|v1|0');
+    // Nova verzija podataka = jedno novo čitanje za oba potrošača (ne dva).
+    expect(service.listNetworkDailyStats).toHaveBeenCalledTimes(2);
+  });
+
+  it('neuspelo čitanje se ne pamti, a `fresh` zaobilazi keš', async () => {
+    const service = okService(10);
+    service.listNetworkDailyStats.mockRejectedValueOnce(new Error('HTTP 503')).mockResolvedValue([] as never);
+    holder.service = service;
+    let api: ReturnType<typeof useAtmosfera> | null = null;
+    function Grab() {
+      api = useAtmosfera();
+      return null;
+    }
+    render(
+      <MemoryRouter initialEntries={['/?view=trendovi']}>
+        <AuthProvider authService={auth}>
+          <AtmosferaProvider>
+            <Grab />
+          </AtmosferaProvider>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+    await flush();
+    await expect(api!.loadNetworkDaily('2026-09-07')).rejects.toThrow('HTTP 503');
+    // Odbijeno obećanje nije u kešu: sledeći poziv čita ponovo i uspeva.
+    await expect(api!.loadNetworkDaily('2026-09-07')).resolves.toEqual([]);
+    expect(service.listNetworkDailyStats).toHaveBeenCalledTimes(2);
+    // Keširano: bez novog čitanja; `fresh` („Pokušaj ponovo“) čita iznova.
+    await api!.loadNetworkDaily('2026-09-07');
+    expect(service.listNetworkDailyStats).toHaveBeenCalledTimes(2);
+    await api!.loadNetworkDaily('2026-09-07', { fresh: true });
+    expect(service.listNetworkDailyStats).toHaveBeenCalledTimes(3);
+    // Drugi prvi dan je drugi ključ.
+    await api!.loadNetworkDaily('2026-09-08');
+    expect(service.listNetworkDailyStats).toHaveBeenCalledTimes(4);
   });
 });

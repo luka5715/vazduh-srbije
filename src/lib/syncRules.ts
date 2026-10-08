@@ -8,10 +8,29 @@ import type { DailyStatRecord, SyncRunRecord } from '@shared/contracts';
 import { addDays } from '@shared/time';
 
 import { minCoveredHours } from '@/lib/coverage';
-import { pluralSr } from '@/lib/format';
+import { formatInt, pluralSr } from '@/lib/format';
 
 /** Posle ovoliko minuta bez uspešne sinhronizacije aplikacija je pokreće sama pri otvaranju. */
 export const STALE_MINUTES = 65;
+
+/**
+ * PRETPOSTAVKE o objavljivanju SEPA – ponovo ih izmeriti na živoj stavci iz redova `SyncRun`
+ * (`windowTo` sinhronizacije prema najnovijem `observedAt` koji je donela); iz ovog okruženja
+ * se izvor ne može meriti. Živi uzorak (8. 10. 2026.): interval 00–01 h bio je dostupan u 01:28.
+ *
+ * `EXPECTED_LAG_MINUTES` – koliko posle kraja satnog intervala SEPA po očekivanju objavi taj sat.
+ * Konzervativno 20 min: manja vrednost bi pokretala sinhronizacije koje ne donose ništa novo.
+ */
+export const EXPECTED_LAG_MINUTES = 20;
+/**
+ * `MIN_GAP_MINUTES` – najmanji razmak između dve automatske sinhronizacije kad pravilo o
+ * objavljenom satu kaže „sinhronizuj“ (poslednja uspešna mora biti starija od ovoga). Štiti
+ * izvor i kapacitet kad SEPA kasni satima: tada aplikacija sinhronizuje najviše jednom u 20 min
+ * po otvorenoj kartici (tiho čitanje je na 12 min), umesto na svakih 65 min bez ovog pravila.
+ * Kad SEPA objavljuje redovno, pravilo o sledećem satu pokreće ~1 sinhronizaciju po satu
+ * (kraj sledećeg sata + 20 min), pa je ovaj razmak samo sigurnosna granica.
+ */
+export const MIN_GAP_MINUTES = 20;
 
 /**
  * `running` red mlađi od ovoga znači da neko drugi upravo sinhronizuje. Stariji red je
@@ -95,12 +114,44 @@ export function hasActiveRun(runs: readonly SyncRunRecord[], now: Date): boolean
 }
 
 /**
- * Pravilo automatskog osvežavanja (samo `rayfin`): poslednja uspešna sinhronizacija je starija
- * od `STALE_MINUTES` (ili je nema) i niko drugi upravo ne sinhronizuje.
+ * Da li je SEPA po očekivanju već objavila sat posle najnovijeg u bazi: SLEDEĆI interval (onaj
+ * koji počinje kad se najnoviji u bazi završi; `newestObservedAt` = početak najnovijeg) završio
+ * se pre više od `EXPECTED_LAG_MINUTES`, pa bi sinhronizacija verovatno donela nov sat. Bez
+ * merenja u bazi (null) – ne zna se, false.
+ *
+ * Primer: u bazi je 23–00 h; sat 00–01 h se završava u 01:00 i očekuje se u 01:20, pa je od
+ * 01:20 „očekivan“. Dok je u bazi 00–01 h, sledeći (01–02 h) se očekuje tek u 02:20 – ranija
+ * verzija je računala kraj najnovijeg intervala u bazi (01:20), što je sat koji VEĆ imamo, pa je
+ * uslov važio odmah posle svake sinhronizacije i pravilo se svodilo na „svakih MIN_GAP“.
  */
-export function shouldAutoSync(lastSync: Date | null, runs: readonly SyncRunRecord[], now: Date): boolean {
+export function nextHourExpected(newestObservedAt: Date | null | undefined, now: Date): boolean {
+  if (!newestObservedAt) return false;
+  const start = newestObservedAt.getTime();
+  if (!Number.isFinite(start)) return false;
+  // Kraj sledećeg intervala (početak najnovijeg + 2 h) + očekivano kašnjenje objave.
+  const published = start + 2 * 3_600_000 + EXPECTED_LAG_MINUTES * 60_000;
+  return published < now.getTime();
+}
+
+/**
+ * Pravilo automatskog osvežavanja (samo `rayfin`), uz uslov da niko drugi upravo ne sinhronizuje:
+ *  - poslednja uspešna sinhronizacija je starija od `STALE_MINUTES` (ili je nema), ILI
+ *  - SEPA je po očekivanju već objavila sledeći sat (`nextHourExpected`) i poslednja
+ *    sinhronizacija je starija od `MIN_GAP_MINUTES`.
+ * Bez `newestObservedAt` (prazna baza, nepoznato) važi samo pravilo od 65 min. Drugi uslov
+ * zatvara rupu u kojoj je aplikacija deo svakog sata zaostajala za SEPA za ceo interval, a
+ * `MIN_GAP_MINUTES` sprečava da jedna kartica sinhronizuje češće od jednom u 20 min.
+ */
+export function shouldAutoSync(
+  lastSync: Date | null,
+  runs: readonly SyncRunRecord[],
+  now: Date,
+  newestObservedAt: Date | null | undefined = null,
+): boolean {
   const ageMs = lastSync ? now.getTime() - lastSync.getTime() : Number.POSITIVE_INFINITY;
-  return ageMs > STALE_MINUTES * 60_000 && !hasActiveRun(runs, now);
+  if (hasActiveRun(runs, now)) return false;
+  if (ageMs > STALE_MINUTES * 60_000) return true;
+  return ageMs > MIN_GAP_MINUTES * 60_000 && nextHourExpected(newestObservedAt, now);
 }
 
 /** Šta radi dugme „Osveži“ u gornjoj traci (stranica Sinhronizacija uvek pokreće posao). */
@@ -144,7 +195,13 @@ export const HISTORY_DAYS = 30;
  */
 export const COMPLETE_DAY_SHARE = 0.8;
 
-export type DayCoverageStatus = 'complete' | 'partial' | 'missing';
+/**
+ * `expired` – prvi dan prozora (danas − 30) koji već ima redove, ali nije potpun: izvor ga već
+ * briše (zadržavanje klizi po satu), pa se ne može dopuniti i ne broji se ni kao nepotpun ni
+ * kao potpun. Prikaz: šrafiran, „istekao (izvor ga već briše)“. Dan bez ijednog reda ostaje
+ * `missing` i danas – ono što izvor još čuva može da se učita.
+ */
+export type DayCoverageStatus = 'complete' | 'partial' | 'missing' | 'expired';
 
 export interface DayCoverage {
   day: string;
@@ -160,11 +217,14 @@ export interface HistoryCoverage {
   days: DayCoverage[];
   /** Stanice koje u prozoru imaju bar jedan dan (imenilac za „potpun dan“). */
   stations: number;
+  /** Dani sa statusom `complete` (istekao rubni dan se ne broji). */
   completeDays: number;
-  /** Dani koji nisu potpuni, od najstarijeg – redosled dopunjavanja. */
+  /** Dani koji nisu potpuni i mogu da se dopune, od najstarijeg – redosled dopunjavanja (bez `expired`). */
   incomplete: string[];
   /** Dani bez ijednog reda (nije učitano). */
   missing: string[];
+  /** Istekao rubni dan (najviše jedan, prvi dan prozora) – vidi `DayCoverageStatus`. */
+  expired: string[];
   /** Za koliko dana izvor briše najstariji nepotpun dan (0 = danas je poslednji dan), ili null. */
   oldestIncompleteExpiresInDays: number | null;
 }
@@ -205,16 +265,19 @@ export function historyCoverage(
     const minHours = minCoveredHours(day);
     let complete = 0;
     for (const hours of byStation?.values() ?? []) if (hours >= minHours) complete++;
-    const status: DayCoverageStatus = reported === 0 ? 'missing' : complete >= needed ? 'complete' : 'partial';
+    // Delimičan prvi dan prozora je istekao: izvor ga već briše, dopuna ga ne može upotpuniti.
+    const status: DayCoverageStatus =
+      reported === 0 ? 'missing' : complete >= needed ? 'complete' : day === first ? 'expired' : 'partial';
     list.push({ day, status, complete, reported });
   }
-  const incomplete = list.filter((d) => d.status !== 'complete').map((d) => d.day);
+  const incomplete = list.filter((d) => d.status === 'partial' || d.status === 'missing').map((d) => d.day);
   return {
     days: list,
     stations: stations.size,
-    completeDays: list.length - incomplete.length,
+    completeDays: list.filter((d) => d.status === 'complete').length,
     incomplete,
     missing: list.filter((d) => d.status === 'missing').map((d) => d.day),
+    expired: list.filter((d) => d.status === 'expired').map((d) => d.day),
     oldestIncompleteExpiresInDays: incomplete.length ? dayDiff(first, incomplete[0]) : null,
   };
 }
@@ -249,9 +312,16 @@ export function formatDayRanges(days: readonly string[], max = 3): string {
   return rest > 0 ? `${text.join(', ')} i još ${rest} ${pluralSr(rest, 'dan', 'dana', 'dana')}` : text.join(', ');
 }
 
-/** Rečenica o rupama: „Nedostaju 13.–14. 09.; delimičan 01. 10.“ */
+/**
+ * Rečenica o rupama: „Nedostaju 13.–14. 09.; delimičan 01. 10.“; istekao rubni dan se navodi
+ * posebno („istekao 07. 09. – izvor ga već briše“) jer se ne može dopuniti.
+ */
 export function coverageGapsText(coverage: HistoryCoverage): string {
-  if (coverage.incomplete.length === 0) return `Svih ${HISTORY_DAYS} prošlih dana je u bazi.`;
+  const expired = coverage.expired.length ? `istekao ${formatDayRanges(coverage.expired)} – izvor ga već briše` : '';
+  if (coverage.incomplete.length === 0) {
+    if (!expired) return `Svih ${HISTORY_DAYS} prošlih dana je u bazi.`;
+    return `Svih ${formatInt(coverage.completeDays)} dana koje izvor još čuva je u bazi; ${expired}.`;
+  }
   const partial = coverage.days.filter((d) => d.status === 'partial').map((d) => d.day);
   const parts: string[] = [];
   if (coverage.missing.length) parts.push(`${coverage.missing.length === 1 ? 'Nedostaje' : 'Nedostaju'} ${formatDayRanges(coverage.missing)}`);
@@ -259,6 +329,7 @@ export function coverageGapsText(coverage: HistoryCoverage): string {
     const word = partial.length === 1 ? 'delimičan' : 'delimični';
     parts.push(`${parts.length ? word : word[0].toUpperCase() + word.slice(1)} ${formatDayRanges(partial)}`);
   }
+  if (expired) parts.push(expired);
   const text = parts.join('; ');
   return text.endsWith('.') ? text : `${text}.`;
 }

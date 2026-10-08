@@ -2,10 +2,10 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { BackfillResult, DailyStatRecord, SyncResult } from '@shared/contracts';
-import { deadlineWarning, stationWarning, SYNC_ALREADY_RUNNING } from '@shared/syncNotes';
+import { deadlineWarning, stationWarning, SYNC_ALREADY_RUNNING, unwrittenRowsWarning } from '@shared/syncNotes';
 import { addDays, todayLocal } from '@shared/time';
 
-import { syncSuccessOutcome, useSync } from '@/hooks/useSync';
+import { SYNC_HOURS_BACK, syncSuccessOutcome, useSync } from '@/hooks/useSync';
 import type { DataService } from '@/services/dataService';
 
 const NOW = new Date('2026-10-07T09:30:00Z');
@@ -88,6 +88,19 @@ describe('syncSuccessOutcome', () => {
     expect(outcome.detail).toMatch(/^2 stanice bez odgovora izvora, 12 preskočeno zbog vremenskog limita; te stanice zadržavaju ranije podatke\./);
   });
 
+  it('redovi koje ni ponovni pokušaj nije upisao: „Osveženo delimično: N redova nije upisano u bazu“', () => {
+    const outcome = syncSuccessOutcome(syncResult({ warnings: [unwrittenRowsWarning(3)] }));
+    expect(outcome.tone).toBe('partial');
+    expect(outcome.title).toBe('Osveženo delimično: 3 reda nisu upisana u bazu');
+    expect(outcome.detail).toBe(
+      '3 reda nisu upisana u bazu (prolazna greška baze); ti redovi zadržavaju ranije vrednosti do sledeće sinhronizacije. 60 stanica, 9.000 merenja, 55 snimaka.',
+    );
+    // Uz stanice bez merenja ostaje naslov „X od Y stanica“, a neupisani redovi su dodatni razlog.
+    const both = syncSuccessOutcome(syncResult({ warnings: [stationWarning(7, 'HTTP 500'), unwrittenRowsWarning(1)] }));
+    expect(both.title).toBe('Osveženo delimično: 59 od 60 stanica');
+    expect(both.detail).toMatch(/te stanice zadržavaju ranije podatke\. 1 red nije upisan u bazu \(prolazna greška baze\)/);
+  });
+
   it('bez upozorenja o stanicama: „Podaci su osveženi“; demo napomena se navodi rečima', () => {
     const outcome = syncSuccessOutcome(syncResult({ warnings: ['Demo režim: podaci nisu stvarna merenja.'] }));
     expect(outcome).toMatchObject({ tone: 'ok', title: 'Podaci su osveženi' });
@@ -96,6 +109,46 @@ describe('syncSuccessOutcome', () => {
 });
 
 describe('useSync', () => {
+  it('traži prozor od 72 h (vikend se sam zatvara) – isti broj kao DEFAULT_HOURS_BACK u funkcijama', async () => {
+    expect(SYNC_HOURS_BACK).toBe(72);
+    const svc = service();
+    const { result } = renderHook(() => useSync(svc, vi.fn()));
+    await act(async () => {
+      await result.current.startSync();
+    });
+    expect(svc.runSync).toHaveBeenCalledWith(72);
+    expect(result.current.outcome).toMatchObject({ tone: 'ok', title: 'Podaci su osveženi' });
+  });
+
+  it('planiranje dopune čita dnevnu statistiku kroz prosleđeni deljeni čitač, ne direktno iz servisa', async () => {
+    const svc = service();
+    const stored = Array.from({ length: 30 }, (_, i) => i + 1).filter((d) => d !== 4);
+    const shared = vi.fn(async (fromDay: string) => {
+      expect(fromDay).toBe(addDays(TODAY, -30));
+      return stored.flatMap(fullDay);
+    });
+    const { result } = renderHook(() => useSync(svc, vi.fn(), shared));
+    await act(async () => {
+      await result.current.startBackfill();
+    });
+    expect(shared).toHaveBeenCalledTimes(1);
+    expect(svc.listNetworkDailyStats).not.toHaveBeenCalled();
+    expect(svc.runBackfill).toHaveBeenCalledWith(addDays(TODAY, -4));
+    expect(result.current.outcome).toMatchObject({ tone: 'ok', title: 'Istorija dopunjena: 1 od 1 dana' });
+  });
+
+  it('istekao rubni dan (danas − 30, delimičan) se ne dopunjava i ne broji u „N od N dana“', async () => {
+    // Svi dani potpuni osim rubnog, koji ima redove samo za 2 od 5 stanica.
+    const rows = Array.from({ length: 29 }, (_, i) => i + 1).flatMap(fullDay).concat(fullDay(30).slice(0, 2));
+    const svc = service({ listNetworkDailyStats: vi.fn(async () => rows) });
+    const { result } = renderHook(() => useSync(svc, vi.fn()));
+    await act(async () => {
+      await result.current.startBackfill();
+    });
+    expect(svc.runBackfill).not.toHaveBeenCalled();
+    expect(result.current.outcome).toMatchObject({ tone: 'info', title: 'Istorija je već potpuna' });
+  });
+
   it('server koji odbija drugi posao daje obaveštenje, ne grešku, i ponovo učitava podatke', async () => {
     const onComplete = vi.fn();
     const svc = service({ runSync: vi.fn(async () => syncResult({ ok: false, syncRunId: '', error: `${SYNC_ALREADY_RUNNING} (pokrenuta pre 1 min u drugoj sesiji).` })) });
@@ -155,5 +208,15 @@ describe('useSync', () => {
     expect(result.current.outcome).toMatchObject({ tone: 'error', title: 'Provera istorije nije uspela' });
     expect(result.current.outcome?.detail).toMatch(/^Sesija nije važeća\./);
     expect(result.current.activity).toBeNull();
+  });
+
+  it('nepoznata greška provere istorije dobija ljudski tekst, ne sirovu GraphQL poruku', async () => {
+    const raw = 'GraphQL errors: The specified input object field `gte` does not exist.';
+    const svc = service({ listNetworkDailyStats: vi.fn(async () => Promise.reject(new Error(raw))) });
+    const { result } = renderHook(() => useSync(svc, vi.fn()));
+    await act(async () => {
+      await result.current.startBackfill();
+    });
+    expect(result.current.outcome?.detail).toBe('Greška pri čitanju baze. Pokušajte ponovo; ako se ponavlja, javite vlasniku.');
   });
 });
