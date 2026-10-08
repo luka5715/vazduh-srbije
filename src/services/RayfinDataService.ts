@@ -5,7 +5,8 @@
  *  - sve što može da pređe stranu ide kroz `.executePaginated()` + `.after(endCursor)`;
  *  - filtriranje po stranom ključu (`station_id`), ne po `station.id`;
  *  - nad tekstualnim poljima samo `eq`-filteri (opseg dana: sortiranje + rano zaustavljanje);
- *  - smer sortiranja malim slovima.
+ *  - smer sortiranja malim slovima;
+ *  - tekst oblika `YYYY-MM-DD` SDK u browseru vraća kao `Date` → `dayKey` ga vraća u tekst.
  */
 
 import type {
@@ -143,6 +144,31 @@ function fromDayAscending(rows: DailyStat[], fromDay: string): DailyStat[] {
   return rows.filter((row) => row.day >= fromDay).sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
 }
 
+/**
+ * Rayfin SDK u browseru (nema `process.env`, pa je zastava `cli-minor-fixes` isključena) pri
+ * čitanju „njuši“ vrednosti: svaki tekst oblika `YYYY-MM-DD` pretvara u `Date`
+ * (`new Date('2026-10-07')`, UTC ponoć) – i `day` iz `DailyStat`, iako je kolona `@text`. Sa
+ * `Date` umesto teksta poređenja dana daju `false`, a ključevi u mapama ne pogađaju nijedan dan
+ * (Sinhronizacija „0/30 dana“, Trendovi „Još nema dnevne statistike“, bez ikakve greške –
+ * potvrđeno u Fabric-u 8. 10. 2026). Zato se dan vraća u tekst odmah po čitanju strane, pre
+ * ranog zaustavljanja i filtriranja. Rez po UTC je tačan jer je SDK `Date` napravio iz datuma
+ * bez vremena (UTC ponoć); tekst se samo seče na 10 znakova.
+ */
+function dayKey(value: unknown): string {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? '' : value.toISOString().slice(0, 10);
+  return typeof value === 'string' ? value.slice(0, 10) : String(value ?? '');
+}
+
+function withDayKey(row: DailyStat): DailyStat {
+  return { ...row, day: dayKey(row.day) };
+}
+
+/** Strana dnevne statistike sa danom vraćenim u tekst (vidi `dayKey`). */
+async function dailyPage(query: { executePaginated(): Promise<Page<DailyStat>> }): Promise<Page<DailyStat>> {
+  const page = await query.executePaginated();
+  return { ...page, items: page.items.map(withDayKey) };
+}
+
 function toStationRecord(row: Station): StationRecord {
   return {
     id: row.id,
@@ -231,7 +257,7 @@ export class RayfinDataService implements DataService {
         .orderBy({ day: 'desc' })
         .first(PAGE_SIZE);
       if (cursor) query = query.after(cursor);
-      return query.executePaginated();
+      return dailyPage(query);
     }, pastFromDay(fromDay));
     return fromDayAscending(rows, fromDay).map(toDailyStatRecord);
   }
@@ -242,7 +268,7 @@ export class RayfinDataService implements DataService {
         .orderBy({ day: 'desc' })
         .first(NETWORK_PAGE_SIZE);
       if (cursor) query = query.after(cursor);
-      return query.executePaginated();
+      return dailyPage(query);
     }, pastFromDay(fromDay));
     return fromDayAscending(rows, fromDay).map(toDailyStatRecord);
   }

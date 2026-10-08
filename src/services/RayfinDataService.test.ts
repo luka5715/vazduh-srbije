@@ -25,8 +25,9 @@ function row(day: string, station = 's1'): Row {
 /**
  * Lažni fluent klijent koji ponaša se kao Fabric GraphQL: `where` prima samo `eq`, a `gte`
  * baca grešku „input object field gte does not exist“; strane idu po `day desc` i `first(n)`.
+ * Sa `sniffDates` radi kao pravi SDK u browseru: tekst `YYYY-MM-DD` vraća kao `Date` (UTC ponoć).
  */
-function fakeClient(rows: Row[], pageSize: number) {
+function fakeClient(rows: Row[], pageSize: number, options: { sniffDates?: boolean } = {}) {
   const requests: Array<{ where: unknown; after?: string; first?: number }> = [];
   const builder = (state: { where?: Record<string, { eq?: string; gte?: string }>; order?: Record<string, string>; first?: number; after?: string }) => ({
     select: () => builder(state),
@@ -44,7 +45,7 @@ function fakeClient(rows: Row[], pageSize: number) {
       items = [...items].sort((a, b) => (a[field as keyof Row] < b[field as keyof Row] ? -1 : 1) * (dir === 'desc' ? -1 : 1));
       const start = state.after ? Number(state.after) : 0;
       const size = Math.min(state.first ?? 100, pageSize);
-      const page = items.slice(start, start + size);
+      const page = items.slice(start, start + size).map((r) => (options.sniffDates ? { ...r, day: new Date(r.day) as unknown as string } : r));
       return { items: page, hasNextPage: start + size < items.length, endCursor: String(start + size) };
     },
   });
@@ -95,6 +96,24 @@ describe('RayfinDataService daily statistics (no range filter on text columns)',
     await new RayfinDataService(station.client).listDailyStats('s0-0', '2026-09-01');
     expect(station.requests).toHaveLength(1);
     expect(station.requests[0].first).toBe(1000);
+  });
+
+  it('returns day as YYYY-MM-DD text even when the SDK sniffs it into a Date, keeping early stop and the fromDay filter', async () => {
+    // Pravi SDK u browseru vraća `day` kao `Date` (UTC ponoć); bez vraćanja u tekst poređenja
+    // „dan < fromDay“ daju false, filter izbaci sve redove, a Sinhronizacija prikazuje 0/30 dana.
+    const rows = DAYS.flatMap((day) => [row(day, 's1'), row(day, 's2')]);
+    const network = fakeClient(rows, 4, { sniffDates: true });
+    const service = new RayfinDataService(network.client);
+
+    const result = await service.listNetworkDailyStats('2026-09-04');
+
+    expect(result.map((r) => r.day)).toEqual(['2026-09-04', '2026-09-04', '2026-09-05', '2026-09-05', '2026-09-06', '2026-09-06']);
+    expect(result.every((r) => typeof r.day === 'string')).toBe(true);
+    expect(network.requests).toHaveLength(2);
+
+    const station = fakeClient(rows, 100, { sniffDates: true });
+    const mine = await new RayfinDataService(station.client).listDailyStats('s2', '2026-09-05');
+    expect(mine.map((r) => `${r.station_id}:${r.day}`)).toEqual(['s2:2026-09-05', 's2:2026-09-06']);
   });
 
   it('returns an empty list when every row is older than fromDay', async () => {

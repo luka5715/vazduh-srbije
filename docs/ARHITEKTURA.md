@@ -536,6 +536,17 @@ tenantu – izvedeni su iz koda i broja stanica. Konstante su `WRITE_CONCURRENCY
   dobija sortiranjem `day desc` i prekidom čitanja čim strana padne ispod traženog dana. Iz istog
   razloga funkcije proveravaju postojanje redova samo `eq` upitima (sve stanice i snimci odjednom,
   `DailyStat` po danu), bez filtera `in`.
+- **Dan je tekst, a SDK ga vraća kao `Date`.** Rayfin SDK (`@microsoft/rayfin-data`, `deserializeDabResponse`)
+  u browseru nema `process.env`, pa zastava `cli-minor-fixes` ne važi i radi stari „njuškajući“ prolaz:
+  svaki tekst oblika `YYYY-MM-DD` (i `true`/`false`) pretvara u `Date` (`new Date('2026-10-07')`, UTC
+  ponoć) – uključujući `DailyStat.day`, iako je kolona `@text({ max: 10 })`. Sa `Date` umesto teksta
+  poređenja `day < fromDay` daju `false`, filter izbaci sve redove, a ključevi po danu u
+  `historyCoverage`/`trendData` ne pogađaju ništa: Sinhronizacija „0/30 dana“, Trendovi „Još nema dnevne
+  statistike“, stanica bez dnevnog grafikona – bez ijedne greške (potvrđeno u Fabric-u 8. 10. 2026).
+  `RayfinDataService` zato odmah po čitanju svake strane vraća dan u tekst (`dayKey`: `Date` →
+  `toISOString().slice(0, 10)`, tačno jer je `Date` nastao iz datuma bez vremena), pre ranog
+  zaustavljanja i filtriranja; test u `RayfinDataService.test.ts` simulira SDK (`sniffDates`). Funkcije
+  nisu pogođene: iz `DailyStat` čitaju samo `id` i `hours`, a `SyncRun.startedAt` prolazi kroz `new Date()`.
 - Greške (`src/lib/errors.ts`): istekla sesija se prepoznaje po HTTP statusu 401/403 sa objekta greške
   (`status`, `statusCode`, `response.status`, ugnežđeni `cause` – `httpStatusOf`) pre bilo kakvog teksta,
   pa „Stanica 401: HTTP 500 za …station_id=401“ nije sesija, a tekstualni obrasci su samo oblici statusa
