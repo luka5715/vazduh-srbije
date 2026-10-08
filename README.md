@@ -603,6 +603,8 @@ service principal i tajne tenanta (vidi Fabric dokumentaciju *Deploy a Fabric ap
   (osvežavanje, „Uživo“, Moja stanica, „Kako čitati“), scheduler i kako proširiti aplikaciju.
 - [docs/IZVOR-PODATAKA.md](docs/IZVOR-PODATAKA.md) – SEPA/Kosava API, polja, tabela SEPA pragova,
   nazivi kategorija, definicije pokazatelja (KPI), ograde i tekst atribucije.
+- [docs/PREDAJA.md](docs/PREDAJA.md) – predaja rada: stanje, odluke vlasnika, lekcije Rayfin SDK-a
+  koje važe za svaki Fabric App, otvoreni zadaci i kako nastaviti u novoj sesiji (isti ili nov projekat).
 
 ## Licenca
 

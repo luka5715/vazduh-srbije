@@ -26,4 +26,20 @@ Pravila projekta: `rayfin/functions/src/types.ts` i `runtimemetadata.json` su ge
 (`npm run typegen`, idempotentno) – ne uređuju se ručno; moduli u `rayfin/functions/src/shared/` moraju
 ostati bez Node.js uvoza jer ih frontend uvozi kao `@shared/*`; UI je na srpskom (latinica);
 u `rayfin` režimu se nikad ne prikazuju demo podaci. Provere: `npm run typecheck`, `npm run lint`,
-`npm test`, `npm run build:demo`, `npm run functions:build`.
+`npm test`, `npm run build:demo`, `npm run functions:build`, `npm run e2e` (posle `build:demo`).
+
+Nastavak rada u novoj sesiji (stanje, odluke vlasnika, otvoreni zadaci): `docs/PREDAJA.md`.
+
+## Lekcije Rayfin SDK-a proverene u Fabric-u (važe za svaki Fabric App)
+
+- Fabric GraphQL (Data API Builder) nad tekstualnim kolonama prima samo `eq`/`neq`/`contains`/
+  `startsWith`/`endsWith`/`isNull`; `gte`/`lte`/`in` odbija iako ih tipovi SDK-a nude. Opseg dana =
+  `orderBy day desc` + rano zaustavljanje; provere postojanja samo `eq` (`src/services/RayfinDataService.ts`).
+- SDK u browseru pretvara svaki tekst oblika `YYYY-MM-DD` u `Date` – tekstualne datume vratiti u tekst
+  odmah po čitanju (`dayKey`), inače poređenja i ključevi po danu tiho ne pogađaju ništa.
+- `.execute()` vraća jednu stranu (100 redova) bez naznake da ima još: uvek `.first(n)`, a za liste koje
+  mogu preći stranu `.executePaginated()` + `.after(endCursor)`.
+- `rayfin/functions/host.json` mora biti u repozitorijumu; funkcije imaju limit ~240 s po pozivu, pa
+  sopstveni rok mora biti kraći; upis u bazu ide identitetom pozivaoca.
+- Deploy samo sa računara sa pregledačem (`npx rayfin login`); push na GitHub ne menja živu aplikaciju;
+  posle deploy-a osvežiti bez keša (Ctrl+F5).
