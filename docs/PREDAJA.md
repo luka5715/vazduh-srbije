@@ -36,25 +36,24 @@ Stanje na dan 8. 10. 2026.
 1. Napravi prazan repozitorijum na GitHub-u i otvori sesiju nad njim.
 2. Prva poruka (prekopiraj):
 
-   > Pravimo novu Microsoft Fabric aplikaciju (Fabric Apps / Rayfin SDK). Preuzmi znanje iz javnog
-   > repozitorijuma https://github.com/luka5715/vazduh-srbije: kloniraj ga u privremeni folder, prekopiraj
-   > `.claude/skills/` (tri Fabric skilla) u ovaj projekat, pročitaj `docs/PREDAJA.md` (lekcije i pravila
-   > koje važe za svaki Fabric App) i `AGENTS.md`, pa primeni iste obrasce: `RayfinDataService` sa
-   > `eq`-filterima, `.first(n)` + `.executePaginated()`, `dayKey` za datume kao tekst, demo režim bez
-   > pravih podataka, skripte `scripts/e2e.mjs` i `scripts/screenshots.mjs`, dokumentacija na srpskom.
-   > Zadatak: <opis nove aplikacije i izvora podataka>.
+   > Pravimo novu Microsoft Fabric aplikaciju (Fabric Apps / Rayfin SDK). Instaliraj kit:
+   > `git clone https://github.com/luka5715/fabric-kit /tmp/fabric-kit && bash /tmp/fabric-kit/install.sh .`
+   > Projekat napravi sa `npm create @microsoft/rayfin@latest` (ili `npx rayfin init`), zadrži Rayfin uvod u
+   > `AGENTS.md` iznad našeg teksta, popuni «…» u `AGENTS.md` i `docs/PREDAJA.md`, pa radi po
+   > `docs/kit/METOD-RADA.md`. Obrasci koda (`RayfinDataService` sa `eq`-filterima, paginacija, `dayKey`,
+   > demo režim, `scripts/e2e.mjs`, `scripts/screenshots.mjs`) su u skilu `fabric-rayfin-engineering` i u
+   > javnom repozitorijumu https://github.com/luka5715/vazduh-srbije. Zadatak: <opis aplikacije i izvora podataka>.
 
-3. Rayfin projekat se pravi sa `npm create @microsoft/rayfin@latest` (ili `npx rayfin init`); posle toga
-   sesija može da prenese obrasce iz ovog repozitorijuma. Opcija za kasnije: iz ovog repozitorijuma
-   napraviti Rayfin šablon (`npx rayfin init ime -t <git-url>`; vidi Rayfin vodič „Author and share
-   Fabric Apps templates“), pa svaka nova aplikacija kreće sa skilovima i pravilima.
+3. Opcija za kasnije: iz ovog repozitorijuma napraviti Rayfin šablon (`npx rayfin init ime -t <git-url>`;
+   vidi Rayfin vodič „Author and share Fabric Apps templates“), pa svaka nova aplikacija kreće i sa kodom.
 
-### Skillovi
-- U repozitorijumu: `.claude/skills/{fabric-app-architect,fabric-app-visual-designer,fabric-app-quality-review}`
-  (v3). Rade u svakoj sesiji nad ovim repozitorijumom; za drugi projekat – prekopirati folder.
-- Na nivou naloga (važe u svakoj sesiji bez kopiranja): Claude podešavanja → Skills → otpremiti
-  zip paketa (`Fabric-Skills-Export-2026-10-07-v3.zip`, isti sadržaj kao folder; zip sa jednim
-  korenskim folderom po skilu).
+### Skillovi i kit
+- Skillovi (`fabric-*`, `research-*`) i opšta pravila dolaze iz kita **`luka5715/fabric-kit`** (verzija u
+  `.claude/fabric-kit.json`). Nadogradnja: `git clone https://github.com/luka5715/fabric-kit /tmp/fabric-kit
+  && bash /tmp/fabric-kit/install.sh .` pa commit; provera: `install.sh . --check`. Lekcije iz projekta
+  idu nazad u kit skilom `fabric-kit-maintainer` („upiši lekcije u kit“).
+- Na nivou naloga (važe u svakoj sesiji, i van ovog repozitorijuma): u kitu `bash tools/make-skills-zip.sh`
+  → Claude podešavanja → Skills → otpremiti zip (jedan korenski folder po skilu).
 
 ## 3. Odluke vlasnika (ne menjati bez pitanja)
 
